@@ -73,3 +73,22 @@ The frontend lives in:
 
   ```csharp
   public DbSet<Customer> Customers => Set<Customer>();
+
+### 3.2 Customer Vertical Slice
+- **Domain**:
+  - `Customer` entity represents a business customer of the invoice system.
+
+- **Infrastructure**:
+  - `InvoiceBillingDbContext` exposes `DbSet<Customer>`.
+  - `CustomerConfiguration` configures the `Customers` table (keys, lengths, defaults).
+
+- **Api**:
+  - `CustomersController` exposes:
+    - `GET /api/customers` returning `CustomerDto[]`.
+    - `POST /api/customers` accepting `CreateCustomerRequest` and returning `CustomerDto`.
+  - DTOs live under `InvoiceBilling.Api/Dtos/Customers`.
+
+- **Frontend**:
+  - `CustomersPage` fetches customers from `/api/customers`.
+  - `CustomersPage` allows creating a new customer and appending it to the list.
+  - API base URL is configured via `API_BASE_URL` in `src/config.ts`.
