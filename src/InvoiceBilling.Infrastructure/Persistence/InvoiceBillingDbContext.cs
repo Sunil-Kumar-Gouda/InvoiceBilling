@@ -11,6 +11,7 @@ public class InvoiceBillingDbContext : DbContext
     }
 
     public DbSet<Product> Products => Set<Product>();
+    public DbSet<Customer> Customers => Set<Customer>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -24,5 +25,9 @@ public class InvoiceBillingDbContext : DbContext
             entity.Property(p => p.UnitPrice).HasColumnType("decimal(18,2)");
             entity.Property(p => p.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
         });
+
+        /* typeof(InvoiceBillingDbContext) → gets the System.Type object for your DbContext class.
+        .Assembly → gets the System.Reflection.Assembly where that type is defined. */
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(InvoiceBillingDbContext).Assembly);
     }
 }
