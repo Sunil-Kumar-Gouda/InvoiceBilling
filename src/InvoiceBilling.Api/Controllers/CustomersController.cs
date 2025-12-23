@@ -18,7 +18,7 @@ public class CustomersController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<CustomerDto>>> Get()
+    public async Task<ActionResult<IReadOnlyList<CustomerDto>>> Get()
     {
         var customers = await _db.Customers
             .AsNoTracking()
@@ -39,6 +39,32 @@ public class CustomersController : ControllerBase
             .ToListAsync();
 
         return Ok(customers);
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<CustomerDto>> GetById(Guid id)
+    {
+        var customer = await _db.Customers
+            .AsNoTracking()
+            .Where(c => c.IsActive && c.Id == id)
+            .Select(c => new CustomerDto
+            {
+                Id = c.Id,
+                Name = c.Name,
+                BusinessName = c.BusinessName,
+                Email = c.Email,
+                Phone = c.Phone,
+                BillingAddress = c.BillingAddress,
+                TaxId = c.TaxId,
+                IsActive = c.IsActive,
+                CreatedAt = c.CreatedAt
+            })
+            .FirstOrDefaultAsync();
+
+        if (customer is null)
+            return NotFound();
+
+        return Ok(customer);
     }
 
     [HttpPost]
@@ -79,6 +105,50 @@ public class CustomersController : ControllerBase
             CreatedAt = customer.CreatedAt
         };
 
-        return CreatedAtAction(nameof(Get), new { id = dto.Id }, dto);
+        return CreatedAtAction(nameof(GetById), new { id = dto.Id }, dto);
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Put(Guid id, [FromBody] UpdateCustomerRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            ModelState.AddModelError(nameof(request.Name), "Name is required.");
+            return ValidationProblem(ModelState);
+        }
+
+        var customer = await _db.Customers
+            .Where(c => c.IsActive && c.Id == id)
+            .FirstOrDefaultAsync();
+
+        if (customer is null)
+            return NotFound();
+
+        customer.Name = request.Name.Trim();
+        customer.BusinessName = request.BusinessName;
+        customer.Email = request.Email;
+        customer.Phone = request.Phone;
+        customer.BillingAddress = request.BillingAddress;
+        customer.TaxId = request.TaxId;
+
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id)
+    {
+        var customer = await _db.Customers
+            .Where(c => c.IsActive && c.Id == id)
+            .FirstOrDefaultAsync();
+
+        if (customer is null)
+            return NotFound();
+
+        // Soft delete
+        customer.IsActive = false;
+
+        await _db.SaveChangesAsync();
+        return NoContent();
     }
 }

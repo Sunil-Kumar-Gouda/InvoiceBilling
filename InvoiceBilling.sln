@@ -13,6 +13,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InvoiceBilling.Application"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InvoiceBilling.Infrastructure", "src\InvoiceBilling.Infrastructure\InvoiceBilling.Infrastructure.csproj", "{DD12D577-EF23-4DC7-9897-01523DC9E2C7}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{A803230D-2E7D-4E3C-99BA-56149CA8D39C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InvoiceBilling.Api.Tests", "tests\InvoiceBilling.Api.Tests\InvoiceBilling.Api.Tests.csproj", "{4EE74D83-50FF-4D37-9667-7D1D5D3A96D1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -38,11 +42,16 @@ Global
 		{DD12D577-EF23-4DC7-9897-01523DC9E2C7}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{DD12D577-EF23-4DC7-9897-01523DC9E2C7}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{DD12D577-EF23-4DC7-9897-01523DC9E2C7}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4EE74D83-50FF-4D37-9667-7D1D5D3A96D1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4EE74D83-50FF-4D37-9667-7D1D5D3A96D1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4EE74D83-50FF-4D37-9667-7D1D5D3A96D1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4EE74D83-50FF-4D37-9667-7D1D5D3A96D1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{66CB5F6D-9866-4ED3-8AA6-E919C7934536} = {5A725B79-3ABF-4025-AAA0-5FBA445ED2C8}
 		{61DB0B27-32CB-4A2F-825B-E8FECFED59D6} = {5A725B79-3ABF-4025-AAA0-5FBA445ED2C8}
 		{5E1E3097-5917-4480-84A0-C97693EA814D} = {5A725B79-3ABF-4025-AAA0-5FBA445ED2C8}
 		{DD12D577-EF23-4DC7-9897-01523DC9E2C7} = {5A725B79-3ABF-4025-AAA0-5FBA445ED2C8}
+		{4EE74D83-50FF-4D37-9667-7D1D5D3A96D1} = {A803230D-2E7D-4E3C-99BA-56149CA8D39C}
 	EndGlobalSection
 EndGlobal

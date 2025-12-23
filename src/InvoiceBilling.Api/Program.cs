@@ -1,12 +1,14 @@
 using InvoiceBilling.Infrastructure;
 var builder = WebApplication.CreateBuilder(args);
-var allowedOrigins = "_allowedOrigins";
 
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>() ?? Array.Empty<string>();
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy(name: allowedOrigins, policy =>
+    options.AddPolicy("SpaCors", policy =>
     {
-        policy.WithOrigins("http://localhost:5173")   // your Vite dev URL
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod();
     });
@@ -24,9 +26,13 @@ builder.Services.AddSwaggerGen();
 
 // Add Infrastructure (DbContext, etc.)
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 app.MapControllers();
+app.MapHealthChecks("/health");
+app.UseCors("SpaCors");
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -35,7 +41,6 @@ if (app.Environment.IsDevelopment())
 }
 
 //app.UseHttpsRedirection();
-app.UseCors(allowedOrigins);
 var summaries = new[]
 {
     "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
@@ -62,3 +67,5 @@ record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
 {
     public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
 }
+
+public partial class Program { }
