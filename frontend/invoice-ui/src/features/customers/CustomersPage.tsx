@@ -1,4 +1,5 @@
-import { useEffect, useState, FormEvent } from "react";
+import { useEffect, useState } from "react";
+import type { FormEvent,ChangeEvent   } from "react";
 import { API_BASE_URL } from "../../config";
 import type { Customer, CreateCustomerRequest } from "./types";
 
@@ -40,7 +41,7 @@ function CustomersPage() {
   }, []);
 
   const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
+    e:  ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     const { name, value } = e.target;
     setForm(prev => ({ ...prev, [name]: value }));
