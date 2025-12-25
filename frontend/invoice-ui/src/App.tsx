@@ -10,6 +10,9 @@ function App() {
           <li>
             <Link to="/customers">Customers</Link>
           </li>
+          <li>
+            <Link to="/products">Products</Link>
+          </li>
           {/* Later: add links for Products, Invoices, Dashboard, etc. */}
         </ul>
       </nav>

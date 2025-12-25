@@ -18,6 +18,7 @@ function CustomersPage() {
   });
 
   useEffect(() => {
+    console.log("CustomerPage mounted -> loading customers");
     const fetchCustomers = async () => {
       try {
         setLoading(true);
