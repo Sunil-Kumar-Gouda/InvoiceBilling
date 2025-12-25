@@ -1,94 +1,186 @@
-# InvoiceBilling – Architecture Overview
+# InvoiceBilling Architecture
 
-## 1. Goals
+## 1. Purpose
+InvoiceBilling is an enterprise-style application used to demonstrate:
+- Clean separation of concerns (Domain / Infrastructure / API / UI)
+- RESTful API design with DTOs
+- Data persistence using EF Core migrations
+- Incremental feature development (Customers, Products, Invoices next)
+- CI pipeline running backend + frontend builds
 
-InvoiceBilling is a small but realistic invoice and billing system designed to:
-
-- Demonstrate clean, layered architecture using .NET 8.
-- Showcase a full-stack implementation with a React + TypeScript SPA.
-- Be easy to run locally (SQLite, Vite dev server).
-- Be ready to evolve towards cloud deployment (e.g., Azure).
-
-The architecture follows a simplified Clean Architecture / Onion Architecture style with clear separation of concerns.
-
----
-
-## 2. Solution Structure
-
-The backend solution is organized into the following projects:
-
-- `InvoiceBilling.Domain`
-- `InvoiceBilling.Application`
-- `InvoiceBilling.Infrastructure`
-- `InvoiceBilling.Api`
-
-The frontend lives in:
-
-- `frontend/invoice-ui` (Vite + React + TypeScript)
-
-### 2.1 Project Responsibilities
-
-#### `InvoiceBilling.Domain`
-- Contains the **core business model**.
-- Holds entities and value objects (e.g., `Customer`, later `Invoice`, `InvoiceLine`, `Product`).
-- Contains **no infrastructure or framework dependencies** (no EF Core, no ASP.NET types).
-- Represents the “heart” of the system.
-
-#### `InvoiceBilling.Application`
-- Intended for **application-level logic** and use cases.
-- Will contain:
-  - Commands, queries, and handlers (CQRS style), e.g., `CreateInvoiceCommand`, `GetInvoicesQuery`.
-  - Interfaces for repositories and services (e.g., `ICustomerRepository`).
-  - Validation logic (e.g., FluentValidation) and cross-cutting patterns.
-- Depends only on `Domain`, not on Infrastructure or Api.
-
-> Note: On Day 1 this project may be mostly empty or minimal; it is intentionally reserved for use case orchestration as the project grows.
-
-#### `InvoiceBilling.Infrastructure`
-- Contains **technical implementations** that support the application:
-  - Entity Framework Core DbContext (`InvoiceBillingDbContext`).
-  - EF Core entity configurations (e.g., `CustomerConfiguration`).
-  - Data access implementations (future repositories).
-- Responsible for persistence and integration with external resources.
-- Depends on `Domain` and EF Core packages.
-- Exposes an extension method `AddInfrastructure(...)` to register its services into the DI container.
-
-#### `InvoiceBilling.Api`
-- ASP.NET Core Web API (.NET 8).
-- Acts as the **entry point / host** for the backend:
-  - Contains `Program.cs`, DI setup, HTTP pipeline configuration.
-  - Exposes REST API endpoints (e.g., `/api/customers`, later `/api/invoices`, `/api/products`).
-  - Configures CORS for the React SPA.
-  - Uses `AddInfrastructure(...)` to plug in the Infrastructure layer.
-- Depends on `Application` and `Infrastructure`.
+This repo is intentionally designed to be clone-and-run for reviewers/interviewers.
 
 ---
 
-## 3. Backend Architecture
+## 2. High-Level Architecture
+The solution is a modular monolith:
+- One backend API (ASP.NET Core .NET 8)
+- One frontend UI (React + TypeScript + Vite)
+- One database for local development (SQLite)
 
-### 3.1 Entity Framework Core & DbContext
+### Deployment Topology (local/dev)
+- React dev server runs on: `http://localhost:5173`
+- API runs on: `http://localhost:5027`
+- SQLite DB file stored locally (configured by API connection string)
 
-- The application uses **Entity Framework Core** with **SQLite** for local development.
-- `InvoiceBillingDbContext` lives in the `Infrastructure` project and exposes `DbSet<T>` properties, e.g.:
+---
 
-  ```csharp
-  public DbSet<Customer> Customers => Set<Customer>();
+## 3. Solution Structure
+Repository layout:
 
-### 3.2 Customer Vertical Slice
-- **Domain**:
-  - `Customer` entity represents a business customer of the invoice system.
+- `src/InvoiceBilling.Api`
+  - ASP.NET Core API (controllers, DTOs, startup)
+  - Defines HTTP contracts and request/response shapes
+  - Hosts Swagger/OpenAPI and Health endpoint
+- `src/InvoiceBilling.Domain`
+  - Pure domain entities (no EF Core / no HTTP / no infrastructure concerns)
+  - Examples: `Customer`, `Product`
+- `src/InvoiceBilling.Infrastructure`
+  - EF Core DbContext, migrations, entity configurations
+  - Dependency injection registrations (Infrastructure layer services)
+- `frontend/invoice-ui`
+  - React + TypeScript UI
+  - Calls backend via `fetch` wrapper and API modules
+- `docs`
+  - Architecture and deployment documentation
+- `.github/workflows`
+  - CI pipeline definition (GitHub Actions)
 
-- **Infrastructure**:
-  - `InvoiceBillingDbContext` exposes `DbSet<Customer>`.
-  - `CustomerConfiguration` configures the `Customers` table (keys, lengths, defaults).
+---
 
-- **Api**:
-  - `CustomersController` exposes:
-    - `GET /api/customers` returning `CustomerDto[]`.
-    - `POST /api/customers` accepting `CreateCustomerRequest` and returning `CustomerDto`.
-  - DTOs live under `InvoiceBilling.Api/Dtos/Customers`.
+## 4. Layering and Dependencies
+Dependency direction is intentionally one-way:
 
-- **Frontend**:
-  - `CustomersPage` fetches customers from `/api/customers`.
-  - `CustomersPage` allows creating a new customer and appending it to the list.
-  - API base URL is configured via `API_BASE_URL` in `src/config.ts`.
+- `Api` references `Infrastructure` and `Domain`
+- `Infrastructure` references `Domain`
+- `Domain` references nothing
+
+This keeps the Domain clean and testable and prevents UI/API concerns from leaking into core business entities.
+
+---
+
+## 5. Modules Implemented (so far)
+
+### 5.1 Customers Module
+Backend:
+- Endpoints:
+  - `GET /api/customers`
+  - `GET /api/customers/{id}`
+  - `POST /api/customers`
+  - `PUT /api/customers/{id}`
+  - `DELETE /api/customers/{id}` (soft delete)
+- Uses DTOs:
+  - `CustomerDto`
+  - `CreateCustomerRequest`
+  - `UpdateCustomerRequest`
+
+Frontend:
+- Customers page supports:
+  - list, create, edit, delete
+- Uses an API module and shared HTTP helper
+
+### 5.2 Products Module
+Backend:
+- Endpoints:
+  - `GET /api/products`
+  - `GET /api/products/{id}`
+  - `POST /api/products`
+  - `PUT /api/products/{id}`
+  - `DELETE /api/products/{id}` (soft delete)
+- Uses DTOs:
+  - `ProductDto`
+  - `CreateProductRequest`
+  - `UpdateProductRequest`
+
+Frontend:
+- Products page supports:
+  - list, create, edit, delete
+- Uses:
+  - `src/api/productsApi.ts`
+  - `src/features/products/*`
+
+---
+
+## 6. Data Model and Persistence
+
+### 6.1 EF Core
+- EF Core is used for ORM and schema migrations.
+- Entity configurations are stored in separate classes in Infrastructure.
+- DbContext applies configurations automatically using:
+  - `modelBuilder.ApplyConfigurationsFromAssembly(...)`
+
+### 6.2 Local Database Choice (SQLite)
+For local clone-and-run:
+- SQLite is used so no external DB server is required.
+- DB file location is controlled by the connection string.
+
+### 6.3 Soft Delete
+Both Customer and Product use:
+- `IsActive` boolean flag
+- DELETE endpoints mark `IsActive = false`
+- List endpoints filter `IsActive = true`
+
+This mimics common enterprise behavior (auditability + safer deletes).
+
+---
+
+## 7. API Design Conventions
+- Controllers return DTOs (not EF entities)
+- Consistent route patterns:
+  - `GET /api/{resource}`
+  - `GET /api/{resource}/{id}`
+  - `POST /api/{resource}`
+  - `PUT /api/{resource}/{id}`
+  - `DELETE /api/{resource}/{id}`
+- Validation:
+  - Minimal validation currently done in controllers (e.g., required Name)
+  - Will evolve to dedicated validation (FluentValidation or pipeline behavior) later
+
+---
+
+## 8. Cross-Cutting Concerns
+
+### 8.1 CORS
+CORS is enabled for frontend-to-backend local development.
+Origins are configuration-driven:
+- `Cors:AllowedOrigins` in appsettings
+
+### 8.2 Health Check
+Health endpoint:
+- `GET /health`
+Used by CI and deployment environments (container orchestrators, load balancers, probes).
+
+---
+
+## 9. Frontend Architecture
+- React + TypeScript + Vite
+- Simple feature folder structure:
+  - `src/features/customers`
+  - `src/features/products`
+- API access pattern:
+  - `src/api/http.ts` provides a typed wrapper
+  - `src/api/*Api.ts` encapsulates endpoint calls
+This isolates network logic from UI components and scales better than inline fetch calls.
+
+---
+
+## 10. CI (Continuous Integration)
+GitHub Actions workflow:
+- Restores, builds, and tests backend
+- Installs and builds frontend
+- Ensures PRs/changes do not break build
+
+Future upgrades:
+- artifact publishing (`dotnet publish`, UI `dist/`)
+- test coverage report
+- Docker build/push (optional)
+
+---
+
+## 11. Roadmap (Next Modules)
+Planned increments:
+- Invoices (Invoice + InvoiceLine) with totals/taxes
+- PDF generation & storage (LocalStack S3 / Azure Blob emulator)
+- Background jobs (SQS / Azure queues + worker)
+- Authentication/Authorization (JWT)
+- Observability (structured logging, tracing)
