@@ -27,6 +27,7 @@ builder.Services.AddSwaggerGen();
 // Add Infrastructure (DbContext, etc.)
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddHealthChecks();
+builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
 
 var app = builder.Build();
 app.MapControllers();
