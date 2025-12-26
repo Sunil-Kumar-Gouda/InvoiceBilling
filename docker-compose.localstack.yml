@@ -1,0 +1,12 @@
+services:
+  localstack:
+    image: localstack/localstack:3
+    container_name: invoicebilling-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,sqs
+      - AWS_DEFAULT_REGION=ap-south-1
+    volumes:
+      - ./infra/localstack/init:/etc/localstack/init/ready.d:ro
+      - /var/run/docker.sock:/var/run/docker.sock
