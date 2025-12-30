@@ -108,7 +108,8 @@ public sealed class InvoicePdfWorker : BackgroundService
             {
                 BucketName = _aws.S3.BucketName,
                 Key = key,
-                InputStream = new MemoryStream(bytes)
+                InputStream = new MemoryStream(bytes),
+                ContentType = "text/plain"
             }, ct);
 
             // Update DB with S3 key

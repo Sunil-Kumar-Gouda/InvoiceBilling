@@ -4,13 +4,15 @@ var builder = WebApplication.CreateBuilder(args);
 var allowedOrigins = builder.Configuration
     .GetSection("Cors:AllowedOrigins")
     .Get<string[]>() ?? Array.Empty<string>();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("SpaCors", policy =>
     {
         policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
-              .AllowAnyMethod();
+              .AllowAnyMethod()
+              .WithExposedHeaders("Content-Disposition");
     });
 });
 
@@ -30,9 +32,9 @@ builder.Services.AddHealthChecks();
 builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
 
 var app = builder.Build();
+app.UseCors("SpaCors");
 app.MapControllers();
 app.MapHealthChecks("/health");
-app.UseCors("SpaCors");
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())

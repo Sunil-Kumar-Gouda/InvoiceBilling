@@ -18,4 +18,5 @@ public sealed class InvoiceDto
     public DateTime CreatedAt { get; set; }
 
     public List<InvoiceLineDto> Lines { get; set; } = new();
+    public decimal TaxRatePercent { get; set; }
 }

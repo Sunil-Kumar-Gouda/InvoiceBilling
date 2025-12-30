@@ -9,6 +9,7 @@ public sealed class Invoice
     public string Status { get; set; } = "Draft"; // Draft | Issued
     public DateTime IssueDate { get; set; }
     public DateTime DueDate { get; set; }
+    public decimal TaxRatePercent { get; set; } = 0m; // e.g., 0, 5, 18
 
     public string CurrencyCode { get; set; } = "INR";
     public decimal Subtotal { get; set; }

@@ -8,6 +8,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
+using InvoiceBilling.Domain.Services;
+using Amazon.S3;
+using Amazon.S3.Model;
+using System.Net;
 
 namespace InvoiceBilling.Api.Controllers;
 
@@ -18,16 +22,23 @@ public class InvoicesController : ControllerBase
     private readonly InvoiceBillingDbContext _db;
     private readonly IAmazonSQS _sqs;
     private readonly AwsOptions _aws;
+    private readonly IInvoiceTotalsCalculator _totals;
+    private readonly IAmazonS3 _s3;
 
     public InvoicesController(
         InvoiceBillingDbContext db,
         IAmazonSQS sqs,
-        IOptions<AwsOptions> awsOptions)
+        IAmazonS3 s3,
+        IOptions<AwsOptions> awsOptions,
+        IInvoiceTotalsCalculator totals)
     {
         _db = db;
         _sqs = sqs;
+        _s3 = s3;
         _aws = awsOptions.Value;
+        _totals = totals;
     }
+
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<InvoiceDto>>> Get()
@@ -134,9 +145,8 @@ public class InvoicesController : ControllerBase
             });
         }
 
-        invoice.Subtotal = invoice.Lines.Sum(x => x.LineTotal);
-        invoice.TaxTotal = 0m; // Day 6 will add tax rules
-        invoice.GrandTotal = invoice.Subtotal + invoice.TaxTotal;
+        invoice.TaxRatePercent = 0m;
+        _totals.Apply(invoice);
 
         _db.Invoices.Add(invoice);
         await _db.SaveChangesAsync();
@@ -192,5 +202,147 @@ public class InvoicesController : ControllerBase
         });
 
         return Ok(new { message = "Invoice issued and job enqueued.", invoiceId = id });
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<ActionResult<InvoiceDto>> Put(Guid id, [FromBody] UpdateInvoiceRequest request)
+    {
+        // Load invoice with lines (tracked)
+        var invoice = await _db.Invoices
+            .Include(i => i.Lines)
+            .FirstOrDefaultAsync(i => i.Id == id);
+
+        if (invoice is null) return NotFound();
+
+        // Draft-only rule
+        if (!string.Equals(invoice.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+            return Conflict("Only Draft invoices can be updated.");
+
+        // Basic validations
+        if (request.Lines is null || request.Lines.Count == 0)
+            return BadRequest("At least one line is required.");
+
+        if (request.DueDate == default)
+            return BadRequest("DueDate is required.");
+
+        if (request.DueDate.Date < invoice.IssueDate.Date)
+            return BadRequest("DueDate cannot be before IssueDate.");
+
+        // Update header fields
+        invoice.DueDate = request.DueDate.Date;
+        invoice.CurrencyCode = string.IsNullOrWhiteSpace(request.CurrencyCode)
+            ? invoice.CurrencyCode
+            : request.CurrencyCode.Trim().ToUpperInvariant();
+
+        invoice.TaxRatePercent = request.TaxRatePercent;
+
+        // Replace lines safely
+        // IMPORTANT: remove old lines so EF deletes them
+        if (invoice.Lines.Count > 0)
+        {
+            _db.InvoiceLines.RemoveRange(invoice.Lines);
+            invoice.Lines.Clear();
+        }
+
+        foreach (var l in request.Lines)
+        {
+            if (l.ProductId == Guid.Empty) return BadRequest("Line ProductId is required.");
+            if (string.IsNullOrWhiteSpace(l.Description)) return BadRequest("Line Description is required.");
+            if (l.Quantity <= 0) return BadRequest("Line Quantity must be > 0.");
+            if (l.UnitPrice < 0) return BadRequest("Line UnitPrice must be >= 0.");
+
+            invoice.Lines.Add(new InvoiceLine
+            {
+                Id = Guid.NewGuid(),
+                InvoiceId = invoice.Id,
+                ProductId = l.ProductId,
+                Description = l.Description.Trim(),
+                UnitPrice = l.UnitPrice,
+                Quantity = l.Quantity
+                // LineTotal will be set by _totals.Apply(invoice)
+            });
+        }
+
+        // Central totals calculation (updates LineTotal + totals)
+        _totals.Apply(invoice);
+
+        await _db.SaveChangesAsync();
+
+        // Return updated DTO (include Lines if you want; below returns full DTO)
+        return Ok(new InvoiceDto
+        {
+            Id = invoice.Id,
+            InvoiceNumber = invoice.InvoiceNumber,
+            CustomerId = invoice.CustomerId,
+            Status = invoice.Status,
+            IssueDate = invoice.IssueDate,
+            DueDate = invoice.DueDate,
+            CurrencyCode = invoice.CurrencyCode,
+            TaxRatePercent = invoice.TaxRatePercent,
+            Subtotal = invoice.Subtotal,
+            TaxTotal = invoice.TaxTotal,
+            GrandTotal = invoice.GrandTotal,
+            PdfS3Key = invoice.PdfS3Key,
+            CreatedAt = invoice.CreatedAt,
+            Lines = invoice.Lines.Select(x => new InvoiceLineDto
+            {
+                Id = x.Id,
+                ProductId = x.ProductId,
+                Description = x.Description,
+                UnitPrice = x.UnitPrice,
+                Quantity = x.Quantity,
+                LineTotal = x.LineTotal
+            }).ToList()
+        });
+    }
+
+    [HttpGet("{id:guid}/pdf")]
+    public async Task<IActionResult> DownloadPdf(Guid id, CancellationToken ct)
+    {
+        var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (invoice is null) return NotFound();
+
+        if (string.IsNullOrWhiteSpace(invoice.PdfS3Key))
+            return Conflict("Invoice file not generated yet. Please issue the invoice and wait for the worker.");
+
+        var bucket = _aws.S3?.BucketName;
+        if (string.IsNullOrWhiteSpace(bucket))
+            return StatusCode(500, "AWS S3 bucket configuration missing (Aws:S3:BucketName).");
+
+        try
+        {
+            var obj = await _s3.GetObjectAsync(new GetObjectRequest
+            {
+                BucketName = bucket,
+                Key = invoice.PdfS3Key
+            }, ct);
+
+            // Decide content type based on key (works for .txt placeholder now and .pdf later)
+            var contentType = GetContentTypeFromKey(invoice.PdfS3Key) ?? obj.Headers.ContentType ?? "application/octet-stream";
+
+            // File name for download
+            var ext = Path.GetExtension(invoice.PdfS3Key);
+            var fileName = string.IsNullOrWhiteSpace(ext)
+                ? $"{invoice.InvoiceNumber}"
+                : $"{invoice.InvoiceNumber}{ext}";
+
+            // Stream from S3 to client
+            return File(obj.ResponseStream, contentType, fileName);
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound || ex.ErrorCode == "NoSuchKey")
+        {
+            return NotFound("Invoice file not found in S3. Re-issue the invoice or re-run the worker.");
+        }
+    }
+
+    private static string? GetContentTypeFromKey(string key)
+    {
+        var ext = Path.GetExtension(key).ToLowerInvariant();
+        return ext switch
+        {
+            ".pdf" => "application/pdf",
+            ".txt" => "text/plain",
+            _ => null
+        };
     }
 }

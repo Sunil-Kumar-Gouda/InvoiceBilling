@@ -7,6 +7,7 @@ using Amazon.S3;
 using Amazon.SQS;
 using InvoiceBilling.Infrastructure.Cloud;
 using Microsoft.Extensions.Options;
+using InvoiceBilling.Domain.Services;
 
 namespace InvoiceBilling.Infrastructure;
 
@@ -47,6 +48,7 @@ public static class DependencyInjection
             var cfg = new AmazonSQSConfig { ServiceURL = opt.ServiceUrl };
             return new AmazonSQSClient(new BasicAWSCredentials("test", "test"), cfg);
         });
+        services.AddSingleton<IInvoiceTotalsCalculator, InvoiceTotalsCalculator>();
 
         return services;
     }

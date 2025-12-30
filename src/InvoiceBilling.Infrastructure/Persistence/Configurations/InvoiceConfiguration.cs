@@ -27,5 +27,8 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
                .WithOne()
                .HasForeignKey(l => l.InvoiceId)
                .OnDelete(DeleteBehavior.Cascade);
+        
+        builder.Property(x => x.TaxRatePercent).HasPrecision(5, 2);
+
     }
 }
