@@ -7,7 +7,8 @@ import type { CreateInvoiceRequest, InvoiceDto, InvoiceLine } from "./types";
 
 import { getCustomers } from "../../api/customersApi";
 import { getProducts } from "../../api/productsApi";
-import { createInvoice, getInvoices, issueInvoice } from "../../api/invoicesApi";
+import { createInvoice, downloadInvoiceFile, getInvoices, issueInvoice } from "../../api/invoicesApi";
+
 
 type LineFormState = {
   productId: string;
@@ -74,6 +75,8 @@ export default function InvoicesPage() {
 
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<InvoiceFormState>(() => createEmptyForm());
+  
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const productsById = useMemo(() => {
     const map = new Map<string, Product>();
@@ -261,6 +264,29 @@ export default function InvoicesPage() {
       setError(message);
     } finally {
       setIssuingId(null);
+    }
+  };
+
+  const handleDownload = async (invoiceId: string) => {
+    try {
+      setDownloadingId(invoiceId);
+      setError(null);
+
+      const { blob, fileName } = await downloadInvoiceFile(invoiceId);
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Failed to download invoice file";
+      setError(message);
+    } finally {
+      setDownloadingId(null);
     }
   };
 
@@ -477,8 +503,17 @@ export default function InvoicesPage() {
                       type="button"
                       onClick={() => handleIssue(inv.id)}
                       disabled={inv.status === "Issued" || issuingId === inv.id}
+                      style={{ marginRight: 8 }}
                     >
                       {issuingId === inv.id ? "Issuing..." : "Issue"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDownload(inv.id)}
+                      disabled={!inv.pdfS3Key || downloadingId === inv.id}
+                    >
+                      {downloadingId === inv.id ? "Downloading..." : "Download"}
                     </button>
                   </td>
                 </tr>
