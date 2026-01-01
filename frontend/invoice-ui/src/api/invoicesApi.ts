@@ -1,4 +1,4 @@
-import { http } from "./http";
+import { http, httpBlob } from "./http";
 import type { CreateInvoiceRequest, InvoiceDto } from "../features/invoices/types";
 
 export function getInvoices(): Promise<InvoiceDto[]> {
@@ -31,31 +31,14 @@ function tryGetFileNameFromContentDisposition(value: string | null): string | nu
   }
 }
 
-export async function downloadInvoiceFile(
-  id: string
-): Promise<{ blob: Blob; fileName: string }> {
-  const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
-  const res = await fetch(`${baseUrl}/api/invoices/${id}/pdf`, {
+export async function downloadInvoiceFile(id: string): Promise<{ blob: Blob; fileName: string }> {
+  const { blob, headers } = await httpBlob(`/api/invoices/${id}/pdf`, {
     method: "GET",
+    headers: { Accept: "application/pdf" },
   });
 
-  if (!res.ok) {
-    // Try to read useful server error message
-    let msg = `Download failed (${res.status})`;
-    try {
-      const text = await res.text();
-      if (text) msg = text;
-    } catch {
-      // ignore
-    }
-    throw new Error(msg);
-  }
-
-  const blob = await res.blob();
-
-  const cd = res.headers.get("content-disposition");
-  const fileName =
-    tryGetFileNameFromContentDisposition(cd) ?? `invoice-${id}.txt`;
+  const cd = headers.get("content-disposition");
+  const fileName = tryGetFileNameFromContentDisposition(cd) ?? `invoice-${id}.pdf`;
 
   return { blob, fileName };
 }

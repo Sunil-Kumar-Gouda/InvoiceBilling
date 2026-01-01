@@ -92,43 +92,127 @@ public sealed class InvoicePdfWorker : BackgroundService
         }
     }
 
+    private static bool TryGetInvoiceId(string body, out Guid invoiceId)
+    {
+        invoiceId = Guid.Empty;
+
+        using var doc = JsonDocument.Parse(body);
+
+        if (!doc.RootElement.TryGetProperty("invoiceId", out var prop))
+            return false;
+
+        // Supports either GUID string or GUID JSON token
+        if (prop.ValueKind == JsonValueKind.String)
+            return Guid.TryParse(prop.GetString(), out invoiceId);
+
+        if (prop.ValueKind == JsonValueKind.Undefined || prop.ValueKind == JsonValueKind.Null)
+            return false;
+
+        // If it was serialized as a GUID token-like string, still try ToString()
+        return Guid.TryParse(prop.ToString(), out invoiceId);
+    }
+
+    private async Task SafeDelete(string queueUrl, Message msg, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(queueUrl))
+        {
+            _logger.LogWarning("Cannot delete message: queueUrl is empty. MessageId={MessageId}", msg?.MessageId);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(msg?.ReceiptHandle))
+        {
+            _logger.LogWarning("Cannot delete message: ReceiptHandle missing. MessageId={MessageId}", msg?.MessageId);
+            return;
+        }
+
+        await _sqs.DeleteMessageAsync(queueUrl, msg.ReceiptHandle, ct);
+    }
+
     private async Task ProcessMessage(string queueUrl, Message msg, CancellationToken ct)
     {
+        if (msg is null)
+        {
+            _logger.LogWarning("Received null SQS message instance.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(msg.Body))
+        {
+            _logger.LogWarning("Received SQS message with empty Body. Deleting. MessageId={MessageId}", msg.MessageId);
+            await SafeDelete(queueUrl, msg, ct);
+            return;
+        }
+
+        Guid invoiceId;
         try
         {
-            var doc = JsonDocument.Parse(msg.Body);
-            var invoiceId = doc.RootElement.GetProperty("invoiceId").GetGuid();
+            if (!TryGetInvoiceId(msg.Body, out invoiceId))
+            {
+                _logger.LogWarning("Invalid message schema (missing/invalid invoiceId). Deleting. Body={Body}", msg.Body);
+                await SafeDelete(queueUrl, msg, ct);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            // JSON parse errors are poison messages; delete them
+            _logger.LogWarning(ex, "Invalid JSON message. Deleting. Body={Body}", msg.Body);
+            await SafeDelete(queueUrl, msg, ct);
+            return;
+        }
+
+        try
+        {
+            // Update DB first (and enforce idempotency)
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<InvoiceBillingDbContext>();
+
+            var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.Id == invoiceId, ct);
+            if (invoice is null)
+            {
+                _logger.LogWarning("Invoice {InvoiceId} not found. Deleting message to avoid retries.", invoiceId);
+                await SafeDelete(queueUrl, msg, ct);
+                return;
+            }
+
+            // Idempotency: if already generated, just delete message
+            if (!string.IsNullOrWhiteSpace(invoice.PdfS3Key))
+            {
+                _logger.LogInformation("Invoice {InvoiceId} already has PdfS3Key={Key}. Deleting message.", invoiceId, invoice.PdfS3Key);
+                await SafeDelete(queueUrl, msg, ct);
+                return;
+            }
+
+            var bucket = _aws.S3?.BucketName;
+            if (string.IsNullOrWhiteSpace(bucket))
+                throw new InvalidOperationException("Aws:S3:BucketName is missing.");
 
             var content = $"Invoice PDF placeholder\nInvoiceId: {invoiceId}\nGeneratedAtUtc: {DateTime.UtcNow:o}\n";
             var bytes = Encoding.UTF8.GetBytes(content);
 
             var key = $"invoices/{invoiceId}.txt";
 
+            await using var ms = new MemoryStream(bytes);
             await _s3.PutObjectAsync(new PutObjectRequest
             {
-                BucketName = _aws.S3.BucketName,
+                BucketName = bucket,
                 Key = key,
-                InputStream = new MemoryStream(bytes),
+                InputStream = ms,
                 ContentType = "text/plain"
             }, ct);
 
-            // Update DB with S3 key
-            using var scope = _scopeFactory.CreateScope();
-            var db = scope.ServiceProvider.GetRequiredService<InvoiceBillingDbContext>();
+            invoice.PdfS3Key = key;
+            await db.SaveChangesAsync(ct);
 
-            var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.Id == invoiceId, ct);
-            if (invoice != null)
-            {
-                invoice.PdfS3Key = key;
-                await db.SaveChangesAsync(ct);
-            }
-
-            await _sqs.DeleteMessageAsync(queueUrl, msg.ReceiptHandle, ct);
+            await SafeDelete(queueUrl, msg, ct);
             _logger.LogInformation("Processed invoice job {InvoiceId} -> {Key}", invoiceId, key);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed processing message: {Body}", msg.Body);
+            // For transient errors (S3/SQS/DB), keep message so it can retry
+            _logger.LogError(ex, "Failed processing invoice message. Will retry. MessageId={MessageId} Body={Body}", msg.MessageId, msg.Body);
         }
     }
+
 }

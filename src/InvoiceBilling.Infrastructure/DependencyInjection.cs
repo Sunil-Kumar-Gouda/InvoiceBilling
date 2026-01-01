@@ -8,6 +8,7 @@ using Amazon.SQS;
 using InvoiceBilling.Infrastructure.Cloud;
 using Microsoft.Extensions.Options;
 using InvoiceBilling.Domain.Services;
+using Microsoft.Extensions.Hosting;
 
 namespace InvoiceBilling.Infrastructure;
 
@@ -15,15 +16,22 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IHostEnvironment environment)
     {
-        // Use SQLite connection string.
-        // If not found in config, fall back to a local file.
-        var connectionString = configuration.GetConnectionString("DefaultConnection")
-                              ?? "Data Source=invoicebilling.db";
+        // Use API project's content root so path is stable for dotnet ef
+        var dataDir = Path.Combine(environment.ContentRootPath, "Data");
+        Directory.CreateDirectory(dataDir);
+
+        var dbPath = Path.Combine(dataDir, "invoicebilling.db");
+
+        // Prefer config if present, otherwise default to the stable path
+        var connectionString = configuration.GetConnectionString("DefaultConnection");
+        if (string.IsNullOrWhiteSpace(connectionString))
+            connectionString = $"Data Source={dbPath}";
 
         services.AddDbContext<InvoiceBillingDbContext>(options =>
-            options.UseSqlite(connectionString));  
+            options.UseSqlite(connectionString));
         
         // Bind AwsOptions from configuration
         services.Configure<AwsOptions>(configuration.GetSection("Aws"));

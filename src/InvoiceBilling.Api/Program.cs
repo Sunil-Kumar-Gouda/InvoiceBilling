@@ -27,7 +27,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 // Add Infrastructure (DbContext, etc.)
-builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
 builder.Services.AddHealthChecks();
 builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
 

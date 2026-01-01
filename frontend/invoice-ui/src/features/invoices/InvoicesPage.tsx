@@ -250,15 +250,33 @@ export default function InvoicesPage() {
     }
   };
 
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  const pollPdfReady = async (invoiceId: string) => {
+    const timeoutMs = 20_000;
+    const intervalMs = 2_000;
+    const end = Date.now() + timeoutMs;
+
+    while (Date.now() < end) {
+      const inv = await getInvoices();
+      setInvoices(inv);
+
+      const found = inv.find(x => x.id === invoiceId);
+      if (found?.pdfS3Key) return;
+
+      await sleep(intervalMs);
+    }
+  };
+
   const handleIssue = async (invoiceId: string) => {
     try {
       setIssuingId(invoiceId);
       setError(null);
 
       await issueInvoice(invoiceId);
+      await loadAll();         // immediate refresh for status
+      await pollPdfReady(invoiceId); // keep refreshing invoices until pdfS3Key appears (or timeout)
 
-      // Refresh to get updated status + PdfS3Key once worker processes it
-      await loadAll();
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to issue invoice";
       setError(message);
@@ -502,19 +520,23 @@ export default function InvoicesPage() {
                     <button
                       type="button"
                       onClick={() => handleIssue(inv.id)}
-                      disabled={inv.status === "Issued" || issuingId === inv.id}
+                      disabled={inv.status !== "Draft" || issuingId === inv.id}
                       style={{ marginRight: 8 }}
                     >
                       {issuingId === inv.id ? "Issuing..." : "Issue"}
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => handleDownload(inv.id)}
-                      disabled={!inv.pdfS3Key || downloadingId === inv.id}
-                    >
-                      {downloadingId === inv.id ? "Downloading..." : "Download"}
-                    </button>
+
+
+                <button
+                  type="button"
+                  onClick={() => handleDownload(inv.id)}
+                  disabled={!inv.pdfS3Key || downloadingId === inv.id}
+                  title={inv.pdfS3Key ? "Download invoice PDF" : "PDF not generated yet. Issue the invoice and wait for the worker."}
+                >
+                  {downloadingId === inv.id ? "Downloading..." : "Download"}
+                </button>
+
                   </td>
                 </tr>
               ))}

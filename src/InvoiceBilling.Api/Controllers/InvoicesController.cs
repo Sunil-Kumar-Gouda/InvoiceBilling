@@ -178,28 +178,45 @@ public class InvoicesController : ControllerBase
     }
 
     [HttpPost("{id:guid}/issue")]
-    public async Task<IActionResult> Issue(Guid id)
+    public async Task<IActionResult> Issue(Guid id, CancellationToken ct)
     {
-        var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == id);
-        if (invoice is null) return NotFound();
+        var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (invoice is null)
+            return Problem404("Invoice not found", $"Invoice {id} was not found.");
 
-        if (invoice.Status == "Issued")
-            return Conflict("Invoice already issued.");
+        if (string.Equals(invoice.Status, "Issued", StringComparison.OrdinalIgnoreCase))
+            return Problem409("Already issued", "Invoice already issued.");
 
         invoice.Status = "Issued";
         invoice.IssueDate = DateTime.UtcNow.Date;
 
-        await _db.SaveChangesAsync();
+        await _db.SaveChangesAsync(ct);
 
-        // Enqueue PDF generation job (LocalStack SQS)
-        var queueUrl = (await _sqs.GetQueueUrlAsync(_aws.Sqs.QueueName)).QueueUrl;
+        // Enqueue PDF job
+        if (string.IsNullOrWhiteSpace(_aws?.Sqs?.QueueName))
+            return Problem500("Configuration error", "Aws:Sqs:QueueName is missing.");
+
+        string queueUrl;
+        try
+        {
+            var q = await _sqs.GetQueueUrlAsync(_aws.Sqs.QueueName, ct);
+            queueUrl = q?.QueueUrl ?? "";
+        }
+        catch (Exception ex)
+        {
+            return Problem500("SQS error", $"Failed to resolve SQS queue URL. {ex.Message}");
+        }
+
+        if (string.IsNullOrWhiteSpace(queueUrl))
+            return Problem500("SQS error", "Queue URL is empty. Check SQS configuration.");
 
         var payload = JsonSerializer.Serialize(new { invoiceId = id });
+
         await _sqs.SendMessageAsync(new SendMessageRequest
         {
             QueueUrl = queueUrl,
             MessageBody = payload
-        });
+        }, ct);
 
         return Ok(new { message = "Invoice issued and job enqueued.", invoiceId = id });
     }
@@ -303,7 +320,9 @@ public class InvoicesController : ControllerBase
         if (invoice is null) return NotFound();
 
         if (string.IsNullOrWhiteSpace(invoice.PdfS3Key))
-            return Conflict("Invoice file not generated yet. Please issue the invoice and wait for the worker.");
+            return Problem409("PDF not ready",
+                "Invoice file not generated yet. Please issue the invoice and wait for the worker.");
+
 
         var bucket = _aws.S3?.BucketName;
         if (string.IsNullOrWhiteSpace(bucket))
@@ -331,7 +350,7 @@ public class InvoicesController : ControllerBase
         }
         catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound || ex.ErrorCode == "NoSuchKey")
         {
-            return NotFound("Invoice file not found in S3. Re-issue the invoice or re-run the worker.");
+            return Problem404("PDF not found", "Invoice file not found in S3. Re-issue the invoice or re-run the worker.");
         }
     }
 
@@ -345,4 +364,17 @@ public class InvoicesController : ControllerBase
             _ => null
         };
     }
+
+    private IActionResult Problem409(string title, string detail) =>
+    Problem(title: title, detail: detail, statusCode: StatusCodes.Status409Conflict);
+
+    private IActionResult Problem404(string title, string detail) =>
+        Problem(title: title, detail: detail, statusCode: StatusCodes.Status404NotFound);
+
+    private IActionResult Problem400(string title, string detail) =>
+        Problem(title: title, detail: detail, statusCode: StatusCodes.Status400BadRequest);
+
+    private IActionResult Problem500(string title, string detail) =>
+        Problem(title: title, detail: detail, statusCode: StatusCodes.Status500InternalServerError);
+
 }
