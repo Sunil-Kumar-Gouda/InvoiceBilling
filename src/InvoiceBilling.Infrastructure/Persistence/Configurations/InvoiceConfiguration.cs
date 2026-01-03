@@ -22,13 +22,30 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         builder.Property(x => x.GrandTotal).HasPrecision(18, 2);
 
         builder.Property(x => x.PdfS3Key).HasMaxLength(512);
+        builder.Property(x => x.TaxRatePercent).HasPrecision(5, 2);
+
+        // Relationships
+        builder.HasOne<Customer>()
+               .WithMany()
+               .HasForeignKey(x => x.CustomerId)
+               // Invoicing data should not be cascade-deleted
+               .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasMany(x => x.Lines)
                .WithOne()
                .HasForeignKey(l => l.InvoiceId)
                .OnDelete(DeleteBehavior.Cascade);
-        
-        builder.Property(x => x.TaxRatePercent).HasPrecision(5, 2);
+
+        // Query indexes (common list filters)
+        builder.HasIndex(x => x.CustomerId);
+        builder.HasIndex(x => x.Status);
+        builder.HasIndex(x => x.IssueDate);
+        builder.HasIndex(x => x.CreatedAt);
+        builder.HasIndex(x => new { x.CustomerId, x.Status });
+
+        builder.Navigation(x => x.Lines)
+       .HasField("_lines")
+       .UsePropertyAccessMode(PropertyAccessMode.Field);
 
     }
 }

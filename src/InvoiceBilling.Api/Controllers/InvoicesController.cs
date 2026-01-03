@@ -1,17 +1,18 @@
+using Amazon.S3;
+using Amazon.S3.Model;
 using Amazon.SQS;
 using Amazon.SQS.Model;
 using InvoiceBilling.Api.Dtos.Invoices;
 using InvoiceBilling.Domain.Entities;
+using InvoiceBilling.Domain.Exceptions;
+using InvoiceBilling.Domain.Services;
 using InvoiceBilling.Infrastructure.Cloud;
 using InvoiceBilling.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using System.Text.Json;
-using InvoiceBilling.Domain.Services;
-using Amazon.S3;
-using Amazon.S3.Model;
 using System.Net;
+using System.Text.Json;
 
 namespace InvoiceBilling.Api.Controllers;
 
@@ -19,6 +20,8 @@ namespace InvoiceBilling.Api.Controllers;
 [Route("api/[controller]")]
 public class InvoicesController : ControllerBase
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly InvoiceBillingDbContext _db;
     private readonly IAmazonSQS _sqs;
     private readonly AwsOptions _aws;
@@ -39,12 +42,41 @@ public class InvoicesController : ControllerBase
         _totals = totals;
     }
 
-
+    // Day 8 (Phase 2): List invoices with basic filters + paging
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<InvoiceDto>>> Get()
+    public async Task<ActionResult<IReadOnlyList<InvoiceDto>>> Get(
+        [FromQuery] string? status,
+        [FromQuery] Guid? customerId,
+        [FromQuery] DateTime? issueDateFrom,
+        [FromQuery] DateTime? issueDateTo,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50,
+        CancellationToken ct = default)
     {
-        var items = await _db.Invoices.AsNoTracking()
+        page = page < 1 ? 1 : page;
+        pageSize = pageSize < 1 ? 1 : pageSize > 200 ? 200 : pageSize;
+
+        var q = _db.Invoices.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            var s = status.Trim();
+            q = q.Where(i => i.Status == s);
+        }
+
+        if (customerId.HasValue && customerId.Value != Guid.Empty)
+            q = q.Where(i => i.CustomerId == customerId.Value);
+
+        if (issueDateFrom.HasValue)
+            q = q.Where(i => i.IssueDate >= issueDateFrom.Value.Date);
+
+        if (issueDateTo.HasValue)
+            q = q.Where(i => i.IssueDate <= issueDateTo.Value.Date);
+
+        var items = await q
             .OrderByDescending(i => i.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(i => new InvoiceDto
             {
                 Id = i.Id,
@@ -54,164 +86,166 @@ public class InvoicesController : ControllerBase
                 IssueDate = i.IssueDate,
                 DueDate = i.DueDate,
                 CurrencyCode = i.CurrencyCode,
+                TaxRatePercent = i.TaxRatePercent,
                 Subtotal = i.Subtotal,
                 TaxTotal = i.TaxTotal,
                 GrandTotal = i.GrandTotal,
                 PdfS3Key = i.PdfS3Key,
                 CreatedAt = i.CreatedAt
             })
-            .ToListAsync();
+            .ToListAsync(ct);
 
         return Ok(items);
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<InvoiceDto>> GetById(Guid id)
+    public async Task<ActionResult<InvoiceDto>> GetById(Guid id, CancellationToken ct)
     {
         var invoice = await _db.Invoices.AsNoTracking()
             .Include(i => i.Lines)
-            .FirstOrDefaultAsync(i => i.Id == id);
+            .FirstOrDefaultAsync(i => i.Id == id, ct);
 
-        if (invoice is null) return NotFound();
+        if (invoice is null)
+            return Problem(
+                title: "Invoice not found",
+                detail: $"Invoice {id} was not found.",
+                statusCode: StatusCodes.Status404NotFound);
 
-        return Ok(new InvoiceDto
-        {
-            Id = invoice.Id,
-            InvoiceNumber = invoice.InvoiceNumber,
-            CustomerId = invoice.CustomerId,
-            Status = invoice.Status,
-            IssueDate = invoice.IssueDate,
-            DueDate = invoice.DueDate,
-            CurrencyCode = invoice.CurrencyCode,
-            Subtotal = invoice.Subtotal,
-            TaxTotal = invoice.TaxTotal,
-            GrandTotal = invoice.GrandTotal,
-            PdfS3Key = invoice.PdfS3Key,
-            CreatedAt = invoice.CreatedAt,
-            Lines = invoice.Lines.Select(l => new InvoiceLineDto
-            {
-                Id = l.Id,
-                ProductId = l.ProductId,
-                Description = l.Description,
-                UnitPrice = l.UnitPrice,
-                Quantity = l.Quantity,
-                LineTotal = l.LineTotal
-            }).ToList()
-        });
+        return Ok(ToDto(invoice));
     }
 
     [HttpPost]
-    public async Task<ActionResult<InvoiceDto>> Post([FromBody] CreateInvoiceRequest request)
+    public async Task<ActionResult<InvoiceDto>> Post([FromBody] CreateInvoiceRequest request, CancellationToken ct)
     {
         if (request.CustomerId == Guid.Empty)
-            return BadRequest("CustomerId is required.");
+            return Problem(title: "Validation failed", detail: "CustomerId is required.", statusCode: 400);
 
         if (request.Lines is null || request.Lines.Count == 0)
-            return BadRequest("At least one line is required.");
+            return Problem(title: "Validation failed", detail: "At least one line is required.", statusCode: 400);
 
-        // Invoice number: simple, deterministic format for now
-        var invoiceNumber = $"INV-{DateTime.UtcNow:yyyyMMdd-HHmmss}";
+        // DB-level existence checks (domain does not query DB)
+        var customerExists = await _db.Customers.AsNoTracking()
+            .AnyAsync(c => c.Id == request.CustomerId, ct);
 
-        var invoice = new Invoice
+        if (!customerExists)
+            return Problem(title: "Validation failed", detail: $"Unknown CustomerId: {request.CustomerId}", statusCode: 400);
+
+        var productIds = request.Lines.Select(x => x.ProductId).Where(x => x != Guid.Empty).Distinct().ToArray();
+        var existingProductIds = await _db.Products.AsNoTracking()
+            .Where(p => productIds.Contains(p.Id))
+            .Select(p => p.Id)
+            .ToListAsync(ct);
+
+        var missing = productIds.Except(existingProductIds).ToArray();
+        if (missing.Length > 0)
+            return Problem(title: "Validation failed", detail: $"Unknown ProductId(s): {string.Join(", ", missing)}", statusCode: 400);
+
+        var invoiceNumber = $"INV-{DateTime.UtcNow:yyyyMMdd-HHmmssfff}-{Random.Shared.Next(1000, 9999)}";
+        var issueDate = request.IssueDate == default ? DateTime.UtcNow.Date : request.IssueDate.Date;
+        var dueDate = request.DueDate == default ? issueDate.AddDays(7) : request.DueDate.Date;
+
+        var lines = request.Lines.Select(l => (l.ProductId, l.Description, l.UnitPrice, l.Quantity));
+
+        try
         {
-            Id = Guid.NewGuid(),
-            InvoiceNumber = invoiceNumber,
-            CustomerId = request.CustomerId,
-            Status = "Draft",
-            IssueDate = request.IssueDate == default ? DateTime.UtcNow.Date : request.IssueDate.Date,
-            DueDate = request.DueDate == default ? DateTime.UtcNow.Date.AddDays(7) : request.DueDate.Date,
-            CurrencyCode = string.IsNullOrWhiteSpace(request.CurrencyCode) ? "INR" : request.CurrencyCode.Trim().ToUpperInvariant(),
-            CreatedAt = DateTime.UtcNow
-        };
+            var invoice = Invoice.CreateDraft(
+                id: Guid.NewGuid(),
+                invoiceNumber: invoiceNumber,
+                customerId: request.CustomerId,
+                issueDate: issueDate,
+                dueDate: dueDate,
+                currencyCode: request.CurrencyCode,
+                createdAtUtc: DateTime.UtcNow,
+                lines: lines);
 
-        foreach (var l in request.Lines)
-        {
-            if (l.ProductId == Guid.Empty) return BadRequest("Line ProductId is required.");
-            if (string.IsNullOrWhiteSpace(l.Description)) return BadRequest("Line Description is required.");
-            if (l.Quantity <= 0) return BadRequest("Line Quantity must be > 0.");
-            if (l.UnitPrice < 0) return BadRequest("Line UnitPrice must be >= 0.");
+            _db.Invoices.Add(invoice);
+            await _db.SaveChangesAsync(ct);
 
-            var lineTotal = l.UnitPrice * l.Quantity;
-
-            invoice.Lines.Add(new InvoiceLine
-            {
-                Id = Guid.NewGuid(),
-                InvoiceId = invoice.Id,
-                ProductId = l.ProductId,
-                Description = l.Description.Trim(),
-                UnitPrice = l.UnitPrice,
-                Quantity = l.Quantity,
-                LineTotal = lineTotal
-            });
+            return CreatedAtAction(nameof(GetById), new { id = invoice.Id }, ToDto(invoice));
         }
-
-        invoice.TaxRatePercent = 0m;
-        _totals.Apply(invoice);
-
-        _db.Invoices.Add(invoice);
-        await _db.SaveChangesAsync();
-
-        return CreatedAtAction(nameof(GetById), new { id = invoice.Id }, new InvoiceDto
+        catch (DomainException ex)
         {
-            Id = invoice.Id,
-            InvoiceNumber = invoice.InvoiceNumber,
-            CustomerId = invoice.CustomerId,
-            Status = invoice.Status,
-            IssueDate = invoice.IssueDate,
-            DueDate = invoice.DueDate,
-            CurrencyCode = invoice.CurrencyCode,
-            Subtotal = invoice.Subtotal,
-            TaxTotal = invoice.TaxTotal,
-            GrandTotal = invoice.GrandTotal,
-            PdfS3Key = invoice.PdfS3Key,
-            CreatedAt = invoice.CreatedAt,
-            Lines = invoice.Lines.Select(l => new InvoiceLineDto
-            {
-                Id = l.Id,
-                ProductId = l.ProductId,
-                Description = l.Description,
-                UnitPrice = l.UnitPrice,
-                Quantity = l.Quantity,
-                LineTotal = l.LineTotal
-            }).ToList()
-        });
+            var status = MapDomainExceptionToStatus(ex.Message);
+            return DomainProblem("Domain rule violation", ex.Message, status);
+        }
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<ActionResult<InvoiceDto>> Put(Guid id, [FromBody] UpdateInvoiceRequest request, CancellationToken ct)
+    {
+        var invoice = await _db.Invoices
+            .Include(i => i.Lines)
+            .FirstOrDefaultAsync(i => i.Id == id, ct);
+
+        if (invoice is null)
+            return Problem(title: "Invoice not found", detail: $"Invoice {id} was not found.", statusCode: 404);
+
+        if (request.Lines is null || request.Lines.Count == 0)
+            return Problem(title: "Validation failed", detail: "At least one line is required.", statusCode: 400);
+
+        // DB-level product existence checks
+        var productIds = request.Lines.Select(x => x.ProductId).Where(x => x != Guid.Empty).Distinct().ToArray();
+        var existingProductIds = await _db.Products.AsNoTracking()
+            .Where(p => productIds.Contains(p.Id))
+            .Select(p => p.Id)
+            .ToListAsync(ct);
+
+        var missing = productIds.Except(existingProductIds).ToArray();
+        if (missing.Length > 0)
+            return Problem(title: "Validation failed", detail: $"Unknown ProductId(s): {string.Join(", ", missing)}", statusCode: 400);
+
+        // Capture old lines so EF deletes them (domain clears backing collection)
+        var oldLines = invoice.Lines.ToList();
+
+        var dueDate = request.DueDate == default ? invoice.DueDate : request.DueDate.Date;
+        var newLines = request.Lines.Select(l => (l.ProductId, l.Description, l.UnitPrice, l.Quantity));
+
+        try
+        {
+            invoice.UpdateDraftHeader(dueDate, request.CurrencyCode, request.TaxRatePercent);
+            invoice.ReplaceLines(newLines);
+
+            if (oldLines.Count > 0)
+                _db.InvoiceLines.RemoveRange(oldLines);
+
+            await _db.SaveChangesAsync(ct);
+
+            return Ok(ToDto(invoice));
+        }
+        catch (DomainException ex)
+        {
+            var status = MapDomainExceptionToStatus(ex.Message);
+            return DomainProblem("Domain rule violation", ex.Message, status);
+        }
     }
 
     [HttpPost("{id:guid}/issue")]
     public async Task<IActionResult> Issue(Guid id, CancellationToken ct)
     {
-        var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == id, ct);
+        var invoice = await _db.Invoices
+            .Include(i => i.Lines)
+            .FirstOrDefaultAsync(i => i.Id == id, ct);
+
         if (invoice is null)
-            return Problem404("Invoice not found", $"Invoice {id} was not found.");
+            return Problem(title: "Invoice not found", detail: $"Invoice {id} was not found.", statusCode: 404);
 
-        if (string.Equals(invoice.Status, "Issued", StringComparison.OrdinalIgnoreCase))
-            return Problem409("Already issued", "Invoice already issued.");
-
-        invoice.Status = "Issued";
-        invoice.IssueDate = DateTime.UtcNow.Date;
-
-        await _db.SaveChangesAsync(ct);
-
-        // Enqueue PDF job
-        if (string.IsNullOrWhiteSpace(_aws?.Sqs?.QueueName))
-            return Problem500("Configuration error", "Aws:Sqs:QueueName is missing.");
-
-        string queueUrl;
         try
         {
-            var q = await _sqs.GetQueueUrlAsync(_aws.Sqs.QueueName, ct);
-            queueUrl = q?.QueueUrl ?? "";
+            invoice.Issue(DateTime.UtcNow);
+            await _db.SaveChangesAsync(ct);
         }
-        catch (Exception ex)
+        catch (DomainException ex)
         {
-            return Problem500("SQS error", $"Failed to resolve SQS queue URL. {ex.Message}");
+            var status = MapDomainExceptionToStatus(ex.Message);
+            return DomainProblem("Domain rule violation", ex.Message, status);
         }
 
-        if (string.IsNullOrWhiteSpace(queueUrl))
-            return Problem500("SQS error", "Queue URL is empty. Check SQS configuration.");
+        if (string.IsNullOrWhiteSpace(_aws?.Sqs?.QueueName))
+            return Problem(title: "Configuration error", detail: "Aws:Sqs:QueueName is missing.", statusCode: 500);
 
-        var payload = JsonSerializer.Serialize(new { invoiceId = id });
+        var queueUrl = (await _sqs.GetQueueUrlAsync(_aws.Sqs.QueueName, ct)).QueueUrl;
 
+        var payload = JsonSerializer.Serialize(new { invoiceId = id }, JsonOptions);
         await _sqs.SendMessageAsync(new SendMessageRequest
         {
             QueueUrl = queueUrl,
@@ -221,72 +255,54 @@ public class InvoicesController : ControllerBase
         return Ok(new { message = "Invoice issued and job enqueued.", invoiceId = id });
     }
 
-    [HttpPut("{id:guid}")]
-    public async Task<ActionResult<InvoiceDto>> Put(Guid id, [FromBody] UpdateInvoiceRequest request)
+    // Day 6: download generated invoice file from S3
+    [HttpGet("{id:guid}/pdf")]
+    public async Task<IActionResult> DownloadPdf(Guid id, CancellationToken ct)
     {
-        // Load invoice with lines (tracked)
-        var invoice = await _db.Invoices
-            .Include(i => i.Lines)
-            .FirstOrDefaultAsync(i => i.Id == id);
-
+        var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(i => i.Id == id, ct);
         if (invoice is null) return NotFound();
 
-        // Draft-only rule
-        if (!string.Equals(invoice.Status, "Draft", StringComparison.OrdinalIgnoreCase))
-            return Conflict("Only Draft invoices can be updated.");
+        if (string.IsNullOrWhiteSpace(invoice.PdfS3Key))
+            return Problem409("PDF not ready",
+                "Invoice file not generated yet. Please issue the invoice and wait for the worker.");
 
-        // Basic validations
-        if (request.Lines is null || request.Lines.Count == 0)
-            return BadRequest("At least one line is required.");
+        var bucket = _aws.S3?.BucketName;
+        if (string.IsNullOrWhiteSpace(bucket))
+            return StatusCode(500, "AWS S3 bucket configuration missing (Aws:S3:BucketName).");
 
-        if (request.DueDate == default)
-            return BadRequest("DueDate is required.");
-
-        if (request.DueDate.Date < invoice.IssueDate.Date)
-            return BadRequest("DueDate cannot be before IssueDate.");
-
-        // Update header fields
-        invoice.DueDate = request.DueDate.Date;
-        invoice.CurrencyCode = string.IsNullOrWhiteSpace(request.CurrencyCode)
-            ? invoice.CurrencyCode
-            : request.CurrencyCode.Trim().ToUpperInvariant();
-
-        invoice.TaxRatePercent = request.TaxRatePercent;
-
-        // Replace lines safely
-        // IMPORTANT: remove old lines so EF deletes them
-        if (invoice.Lines.Count > 0)
+        try
         {
-            _db.InvoiceLines.RemoveRange(invoice.Lines);
-            invoice.Lines.Clear();
-        }
-
-        foreach (var l in request.Lines)
-        {
-            if (l.ProductId == Guid.Empty) return BadRequest("Line ProductId is required.");
-            if (string.IsNullOrWhiteSpace(l.Description)) return BadRequest("Line Description is required.");
-            if (l.Quantity <= 0) return BadRequest("Line Quantity must be > 0.");
-            if (l.UnitPrice < 0) return BadRequest("Line UnitPrice must be >= 0.");
-
-            invoice.Lines.Add(new InvoiceLine
+            var obj = await _s3.GetObjectAsync(new GetObjectRequest
             {
-                Id = Guid.NewGuid(),
-                InvoiceId = invoice.Id,
-                ProductId = l.ProductId,
-                Description = l.Description.Trim(),
-                UnitPrice = l.UnitPrice,
-                Quantity = l.Quantity
-                // LineTotal will be set by _totals.Apply(invoice)
-            });
+                BucketName = bucket,
+                Key = invoice.PdfS3Key
+            }, ct);
+
+            var contentType = GetContentTypeFromKey(invoice.PdfS3Key) ?? obj.Headers.ContentType ?? "application/octet-stream";
+
+            var ext = Path.GetExtension(invoice.PdfS3Key);
+            var fileName = string.IsNullOrWhiteSpace(ext)
+                ? $"{invoice.InvoiceNumber}"
+                : $"{invoice.InvoiceNumber}{ext}";
+
+            return File(obj.ResponseStream, contentType, fileName);
         }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound || ex.ErrorCode == "NoSuchKey")
+        {
+            return Problem404("PDF not found", "Invoice file not found in S3. Re-issue the invoice or re-run the worker.");
+        }
+    }
 
-        // Central totals calculation (updates LineTotal + totals)
-        _totals.Apply(invoice);
+    private static string? NormalizeCurrency(string? currencyCode)
+    {
+        var cc = (currencyCode ?? "").Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(cc)) cc = "INR";
+        return cc.Length == 3 ? cc : null;
+    }
 
-        await _db.SaveChangesAsync();
-
-        // Return updated DTO (include Lines if you want; below returns full DTO)
-        return Ok(new InvoiceDto
+    private static InvoiceDto ToDto(Invoice invoice)
+    {
+        return new InvoiceDto
         {
             Id = invoice.Id,
             InvoiceNumber = invoice.InvoiceNumber,
@@ -301,57 +317,16 @@ public class InvoicesController : ControllerBase
             GrandTotal = invoice.GrandTotal,
             PdfS3Key = invoice.PdfS3Key,
             CreatedAt = invoice.CreatedAt,
-            Lines = invoice.Lines.Select(x => new InvoiceLineDto
+            Lines = invoice.Lines.Select(l => new InvoiceLineDto
             {
-                Id = x.Id,
-                ProductId = x.ProductId,
-                Description = x.Description,
-                UnitPrice = x.UnitPrice,
-                Quantity = x.Quantity,
-                LineTotal = x.LineTotal
+                Id = l.Id,
+                ProductId = l.ProductId,
+                Description = l.Description,
+                UnitPrice = l.UnitPrice,
+                Quantity = l.Quantity,
+                LineTotal = l.LineTotal
             }).ToList()
-        });
-    }
-
-    [HttpGet("{id:guid}/pdf")]
-    public async Task<IActionResult> DownloadPdf(Guid id, CancellationToken ct)
-    {
-        var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(i => i.Id == id, ct);
-        if (invoice is null) return NotFound();
-
-        if (string.IsNullOrWhiteSpace(invoice.PdfS3Key))
-            return Problem409("PDF not ready",
-                "Invoice file not generated yet. Please issue the invoice and wait for the worker.");
-
-
-        var bucket = _aws.S3?.BucketName;
-        if (string.IsNullOrWhiteSpace(bucket))
-            return StatusCode(500, "AWS S3 bucket configuration missing (Aws:S3:BucketName).");
-
-        try
-        {
-            var obj = await _s3.GetObjectAsync(new GetObjectRequest
-            {
-                BucketName = bucket,
-                Key = invoice.PdfS3Key
-            }, ct);
-
-            // Decide content type based on key (works for .txt placeholder now and .pdf later)
-            var contentType = GetContentTypeFromKey(invoice.PdfS3Key) ?? obj.Headers.ContentType ?? "application/octet-stream";
-
-            // File name for download
-            var ext = Path.GetExtension(invoice.PdfS3Key);
-            var fileName = string.IsNullOrWhiteSpace(ext)
-                ? $"{invoice.InvoiceNumber}"
-                : $"{invoice.InvoiceNumber}{ext}";
-
-            // Stream from S3 to client
-            return File(obj.ResponseStream, contentType, fileName);
-        }
-        catch (AmazonS3Exception ex) when (ex.StatusCode == HttpStatusCode.NotFound || ex.ErrorCode == "NoSuchKey")
-        {
-            return Problem404("PDF not found", "Invoice file not found in S3. Re-issue the invoice or re-run the worker.");
-        }
+        };
     }
 
     private static string? GetContentTypeFromKey(string key)
@@ -366,7 +341,7 @@ public class InvoicesController : ControllerBase
     }
 
     private IActionResult Problem409(string title, string detail) =>
-    Problem(title: title, detail: detail, statusCode: StatusCodes.Status409Conflict);
+        Problem(title: title, detail: detail, statusCode: StatusCodes.Status409Conflict);
 
     private IActionResult Problem404(string title, string detail) =>
         Problem(title: title, detail: detail, statusCode: StatusCodes.Status404NotFound);
@@ -377,4 +352,14 @@ public class InvoicesController : ControllerBase
     private IActionResult Problem500(string title, string detail) =>
         Problem(title: title, detail: detail, statusCode: StatusCodes.Status500InternalServerError);
 
+    private ObjectResult DomainProblem(string title, string detail, int statusCode) =>
+    Problem(title: title, detail: detail, statusCode: statusCode);
+
+    private int MapDomainExceptionToStatus(string message)
+    {
+        // Treat invalid state transitions as 409; input/invariant violations as 400
+        if (message.Contains("Only Draft", StringComparison.OrdinalIgnoreCase)) return StatusCodes.Status409Conflict;
+        if (message.Contains("already", StringComparison.OrdinalIgnoreCase)) return StatusCodes.Status409Conflict;
+        return StatusCodes.Status400BadRequest;
+    }
 }

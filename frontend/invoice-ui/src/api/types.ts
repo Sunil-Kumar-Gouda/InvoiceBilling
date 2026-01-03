@@ -4,7 +4,8 @@ export type ProblemDetails = {
   status?: number;
   detail?: string;
   instance?: string;
-  // Allow extensions like traceId, errorCode, etc.
+
+  // Allow server extensions: traceId, errorCode, errors (validation), etc.
   [key: string]: unknown;
 };
 

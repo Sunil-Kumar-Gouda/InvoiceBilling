@@ -2,6 +2,7 @@ using Amazon.S3;
 using Amazon.S3.Model;
 using Amazon.SQS;
 using Amazon.SQS.Model;
+using InvoiceBilling.Domain.Exceptions;
 using InvoiceBilling.Infrastructure.Cloud;
 using InvoiceBilling.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -144,6 +145,18 @@ public sealed class InvoicePdfWorker : BackgroundService
             return;
         }
 
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(msg.Body);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Invalid JSON. Deleting message. MessageId={MessageId}", msg.MessageId);
+            await _sqs.DeleteMessageAsync(queueUrl, msg.ReceiptHandle, ct);
+            return;
+        }
+
         Guid invoiceId;
         try
         {
@@ -202,8 +215,15 @@ public sealed class InvoicePdfWorker : BackgroundService
                 ContentType = "text/plain"
             }, ct);
 
-            invoice.PdfS3Key = key;
-            await db.SaveChangesAsync(ct);
+            try
+            {
+                invoice.AttachPdf(key);
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DomainException ex)
+            {
+                _logger.LogWarning(ex, "Domain rule prevented attaching PDF for InvoiceId={InvoiceId}", invoiceId);
+            }
 
             await SafeDelete(queueUrl, msg, ct);
             _logger.LogInformation("Processed invoice job {InvoiceId} -> {Key}", invoiceId, key);
@@ -214,5 +234,4 @@ public sealed class InvoicePdfWorker : BackgroundService
             _logger.LogError(ex, "Failed processing invoice message. Will retry. MessageId={MessageId} Body={Body}", msg.MessageId, msg.Body);
         }
     }
-
 }

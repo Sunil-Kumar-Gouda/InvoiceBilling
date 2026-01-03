@@ -1,4 +1,4 @@
-export type InvoiceLine = {
+export type InvoiceLineInput = {
   productId: string;
   description: string;
   unitPrice: number;
@@ -7,10 +7,26 @@ export type InvoiceLine = {
 
 export type CreateInvoiceRequest = {
   customerId: string;
-  issueDate: string;
-  dueDate: string;
-  currencyCode: string;
-  lines: InvoiceLine[];
+  issueDate: string; // yyyy-MM-dd
+  dueDate: string; // yyyy-MM-dd
+  currencyCode: string; // 3-letter ISO (e.g., INR)
+  lines: InvoiceLineInput[];
+};
+
+export type UpdateInvoiceRequest = {
+  dueDate: string; // yyyy-MM-dd
+  currencyCode: string; // 3-letter ISO (e.g., INR)
+  taxRatePercent: number; // 0..100
+  lines: InvoiceLineInput[];
+};
+
+export type InvoiceLineDto = {
+  id: string;
+  productId: string;
+  description: string;
+  unitPrice: number;
+  quantity: number;
+  lineTotal: number;
 };
 
 export type InvoiceDto = {
@@ -20,10 +36,26 @@ export type InvoiceDto = {
   status: string;
   issueDate: string;
   dueDate: string;
+
   currencyCode: string;
+  taxRatePercent: number;
+
   subtotal: number;
   taxTotal: number;
   grandTotal: number;
+
   pdfS3Key?: string | null;
   createdAt: string;
+
+  // Present for GET /api/invoices/{id}; list endpoint may omit it
+  lines?: InvoiceLineDto[];
+};
+
+export type GetInvoicesQuery = {
+  status?: string;
+  customerId?: string;
+  issueDateFrom?: string; // yyyy-MM-dd
+  issueDateTo?: string; // yyyy-MM-dd
+  page?: number;
+  pageSize?: number;
 };

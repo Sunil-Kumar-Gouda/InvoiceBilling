@@ -32,16 +32,8 @@ public sealed class InvoiceTotalsCalculator : IInvoiceTotalsCalculator
     {
         if (invoice is null) throw new ArgumentNullException(nameof(invoice));
 
-        // Update line totals first
-        foreach (var l in invoice.Lines)
-        {
-            l.LineTotal = RoundMoney(l.UnitPrice * l.Quantity);
-        }
-
-        var totals = Calculate(invoice.Lines, invoice.TaxRatePercent);
-        invoice.Subtotal = totals.Subtotal;
-        invoice.TaxTotal = totals.TaxTotal;
-        invoice.GrandTotal = totals.GrandTotal;
+        // Delegate to the aggregate’s rules (single source of truth)
+        invoice.RecalculateTotals();
     }
 
     private static decimal NormalizeTaxRate(decimal taxRatePercent)
