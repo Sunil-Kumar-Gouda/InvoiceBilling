@@ -1,3 +1,4 @@
+using InvoiceBilling.Application.Invoices.UpdateDraftInvoice;
 using InvoiceBilling.Infrastructure;
 var builder = WebApplication.CreateBuilder(args);
 
@@ -28,6 +29,11 @@ builder.Services.AddSwaggerGen();
 
 // Add Infrastructure (DbContext, etc.)
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
+
+// CQRS: register MediatR handlers from Application layer
+builder.Services.AddMediatR(cfg =>
+    cfg.RegisterServicesFromAssemblyContaining<UpdateDraftInvoiceCommand>());
+
 builder.Services.AddHealthChecks();
 builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
 

@@ -13,6 +13,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Net;
 using System.Text.Json;
+using InvoiceBilling.Application.Invoices.UpdateDraftInvoice;
+using MediatR;
 
 namespace InvoiceBilling.Api.Controllers;
 
@@ -23,6 +25,7 @@ public class InvoicesController : ControllerBase
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     private readonly InvoiceBillingDbContext _db;
+    private readonly IMediator _mediator;
     private readonly IAmazonSQS _sqs;
     private readonly AwsOptions _aws;
     private readonly IInvoiceTotalsCalculator _totals;
@@ -30,12 +33,14 @@ public class InvoicesController : ControllerBase
 
     public InvoicesController(
         InvoiceBillingDbContext db,
+        IMediator mediator,
         IAmazonSQS sqs,
         IAmazonS3 s3,
         IOptions<AwsOptions> awsOptions,
         IInvoiceTotalsCalculator totals)
     {
         _db = db;
+         _mediator = mediator;
         _sqs = sqs;
         _s3 = s3;
         _aws = awsOptions.Value;
@@ -173,44 +178,28 @@ public class InvoicesController : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<InvoiceDto>> Put(Guid id, [FromBody] UpdateInvoiceRequest request, CancellationToken ct)
     {
-        var invoice = await _db.Invoices
-            .Include(i => i.Lines)
-            .FirstOrDefaultAsync(i => i.Id == id, ct);
-
-        if (invoice is null)
-            return Problem(title: "Invoice not found", detail: $"Invoice {id} was not found.", statusCode: 404);
-
-        if (request.Lines is null || request.Lines.Count == 0)
-            return Problem(title: "Validation failed", detail: "At least one line is required.", statusCode: 400);
-
-        // DB-level product existence checks
-        var productIds = request.Lines.Select(x => x.ProductId).Where(x => x != Guid.Empty).Distinct().ToArray();
-        var existingProductIds = await _db.Products.AsNoTracking()
-            .Where(p => productIds.Contains(p.Id))
-            .Select(p => p.Id)
-            .ToListAsync(ct);
-
-        var missing = productIds.Except(existingProductIds).ToArray();
-        if (missing.Length > 0)
-            return Problem(title: "Validation failed", detail: $"Unknown ProductId(s): {string.Join(", ", missing)}", statusCode: 400);
-
-        // Capture old lines so EF deletes them (domain clears backing collection)
-        var oldLines = invoice.Lines.ToList();
-
-        var dueDate = request.DueDate == default ? invoice.DueDate : request.DueDate.Date;
-        var newLines = request.Lines.Select(l => (l.ProductId, l.Description, l.UnitPrice, l.Quantity));
-
         try
         {
-            invoice.UpdateDraftHeader(dueDate, request.CurrencyCode, request.TaxRatePercent);
-            invoice.ReplaceLines(newLines);
+            var cmd = new UpdateDraftInvoiceCommand(
+                InvoiceId: id,
+                DueDate: request.DueDate,
+                CurrencyCode: request.CurrencyCode,
+                TaxRatePercent: request.TaxRatePercent,
+                Lines: (request.Lines ?? new List<UpdateInvoiceLineRequest>())
+                    .Select(l => new UpdateDraftInvoiceLine(l.ProductId, l.Description, l.UnitPrice, l.Quantity))
+                    .ToList());
 
-            if (oldLines.Count > 0)
-                _db.InvoiceLines.RemoveRange(oldLines);
+            var result = await _mediator.Send(cmd, ct);
 
-            await _db.SaveChangesAsync(ct);
+            if (!result.Succeeded)
+            {
+                return Problem(
+                    title: result.ErrorTitle ?? "Request failed",
+                    detail: result.ErrorDetail ?? "The request could not be completed.",
+                    statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
+            }
 
-            return Ok(ToDto(invoice));
+            return Ok(ToDto(result.Invoice!));
         }
         catch (DomainException ex)
         {
@@ -255,7 +244,6 @@ public class InvoicesController : ControllerBase
         return Ok(new { message = "Invoice issued and job enqueued.", invoiceId = id });
     }
 
-    // Day 6: download generated invoice file from S3
     [HttpGet("{id:guid}/pdf")]
     public async Task<IActionResult> DownloadPdf(Guid id, CancellationToken ct)
     {

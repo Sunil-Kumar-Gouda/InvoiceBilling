@@ -1,4 +1,5 @@
 using InvoiceBilling.Infrastructure.Persistence;
+using InvoiceBilling.Application.Common.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +34,10 @@ public static class DependencyInjection
         services.AddDbContext<InvoiceBillingDbContext>(options =>
             options.UseSqlite(connectionString));
         
+        // Expose a minimal abstraction for Application handlers.
+        services.AddScoped<IInvoiceBillingDbContext>(sp =>
+            sp.GetRequiredService<InvoiceBillingDbContext>());
+            
         // Bind AwsOptions from configuration
         services.Configure<AwsOptions>(configuration.GetSection("Aws"));
 

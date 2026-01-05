@@ -1,9 +1,10 @@
+using InvoiceBilling.Application.Common.Persistence;
 using InvoiceBilling.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace InvoiceBilling.Infrastructure.Persistence;
 
-public class InvoiceBillingDbContext : DbContext
+public class InvoiceBillingDbContext : DbContext, IInvoiceBillingDbContext
 {
     public InvoiceBillingDbContext(DbContextOptions<InvoiceBillingDbContext> options)
         : base(options)
