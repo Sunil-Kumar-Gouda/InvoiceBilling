@@ -1,13 +1,13 @@
 using System.Net;
-using Microsoft.AspNetCore.Mvc.Testing;
+using InvoiceBilling.Api.Tests.Infrastructure;
 
 namespace InvoiceBilling.Api.Tests;
 
-public class HealthTests : IClassFixture<WebApplicationFactory<Program>>
+public class HealthTests : IClassFixture<TestWebApplicationFactory>
 {
-    private readonly WebApplicationFactory<Program> _factory;
+    private readonly TestWebApplicationFactory _factory;
 
-    public HealthTests(WebApplicationFactory<Program> factory)
+    public HealthTests(TestWebApplicationFactory factory)
     {
         _factory = factory;
     }
