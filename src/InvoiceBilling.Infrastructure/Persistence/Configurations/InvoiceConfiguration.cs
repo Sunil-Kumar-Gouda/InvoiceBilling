@@ -8,7 +8,6 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
 {
     public void Configure(EntityTypeBuilder<Invoice> builder)
     {
-        builder.ToTable("Invoices");
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.InvoiceNumber).HasMaxLength(32).IsRequired();
@@ -23,6 +22,15 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
 
         builder.Property(x => x.PdfS3Key).HasMaxLength(512);
         builder.Property(x => x.TaxRatePercent).HasPrecision(5, 2);
+       
+        // Constraints (DB-level safety net)
+       builder.ToTable(t =>
+       {
+              t.HasCheckConstraint("CK_Invoices_TaxRatePercent_Range", "TaxRatePercent >= 0 AND TaxRatePercent <= 100");
+              t.HasCheckConstraint("CK_Invoices_Subtotal_NonNegative", "Subtotal >= 0");
+              t.HasCheckConstraint("CK_Invoices_TaxTotal_NonNegative", "TaxTotal >= 0");
+              t.HasCheckConstraint("CK_Invoices_GrandTotal_NonNegative", "GrandTotal >= 0");
+       });
 
         // Relationships
         builder.HasOne<Customer>()
