@@ -10,6 +10,7 @@ using InvoiceBilling.Infrastructure.Cloud;
 using Microsoft.Extensions.Options;
 using InvoiceBilling.Domain.Services;
 using Microsoft.Extensions.Hosting;
+using InvoiceBilling.Application.Common.Jobs;
 
 namespace InvoiceBilling.Infrastructure;
 
@@ -62,6 +63,8 @@ public static class DependencyInjection
             return new AmazonSQSClient(new BasicAWSCredentials("test", "test"), cfg);
         });
         services.AddSingleton<IInvoiceTotalsCalculator, InvoiceTotalsCalculator>();
+        services.AddSingleton<IInvoicePdfJobEnqueuer, SqsInvoicePdfJobEnqueuer>();
+
 
         return services;
     }

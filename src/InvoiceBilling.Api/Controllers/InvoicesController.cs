@@ -15,6 +15,7 @@ using System.Net;
 using System.Text.Json;
 using InvoiceBilling.Application.Invoices.UpdateDraftInvoice;
 using MediatR;
+using InvoiceBilling.Application.Common.Jobs;
 
 namespace InvoiceBilling.Api.Controllers;
 
@@ -26,25 +27,28 @@ public class InvoicesController : ControllerBase
 
     private readonly InvoiceBillingDbContext _db;
     private readonly IMediator _mediator;
-    private readonly IAmazonSQS _sqs;
     private readonly AwsOptions _aws;
     private readonly IInvoiceTotalsCalculator _totals;
     private readonly IAmazonS3 _s3;
+    private readonly IInvoicePdfJobEnqueuer _pdfJobs;
+    private readonly ILogger<InvoicesController> _logger;
 
     public InvoicesController(
         InvoiceBillingDbContext db,
         IMediator mediator,
-        IAmazonSQS sqs,
         IAmazonS3 s3,
         IOptions<AwsOptions> awsOptions,
-        IInvoiceTotalsCalculator totals)
+        IInvoiceTotalsCalculator totals,
+        IInvoicePdfJobEnqueuer pdfJobs,
+        ILogger<InvoicesController> logger)
     {
         _db = db;
          _mediator = mediator;
-        _sqs = sqs;
         _s3 = s3;
         _aws = awsOptions.Value;
         _totals = totals;
+        _pdfJobs = pdfJobs;
+        _logger = logger;
     }
 
     // Day 8 (Phase 2): List invoices with basic filters + paging
@@ -232,16 +236,27 @@ public class InvoicesController : ControllerBase
         if (string.IsNullOrWhiteSpace(_aws?.Sqs?.QueueName))
             return Problem(title: "Configuration error", detail: "Aws:Sqs:QueueName is missing.", statusCode: 500);
 
-        var queueUrl = (await _sqs.GetQueueUrlAsync(_aws.Sqs.QueueName, ct)).QueueUrl;
+        var jobEnqueued = false;
 
-        var payload = JsonSerializer.Serialize(new { invoiceId = id }, JsonOptions);
-        await _sqs.SendMessageAsync(new SendMessageRequest
+        try
         {
-            QueueUrl = queueUrl,
-            MessageBody = payload
-        }, ct);
+            await _pdfJobs.EnqueueInvoicePdfJobAsync(id, ct);
+            jobEnqueued = true;
+        }
+        catch (Exception ex)
+        {
+            // Important: invoice is already issued and saved. Do not fail the API call due to enqueue failure.
+            _logger.LogError(ex, "Invoice {InvoiceId} issued, but PDF job enqueue failed.", id);
+        }
 
-        return Ok(new { message = "Invoice issued and job enqueued.", invoiceId = id });
+        return Ok(new
+        {
+            message = jobEnqueued
+                ? "Invoice issued and job enqueued."
+                : "Invoice issued. PDF job enqueue failed or is disabled.",
+            invoiceId = id,
+            jobEnqueued
+        });
     }
 
     [HttpGet("{id:guid}/pdf")]
