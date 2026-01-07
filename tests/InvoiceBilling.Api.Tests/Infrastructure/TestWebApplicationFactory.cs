@@ -6,6 +6,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using InvoiceBilling.Application.Common.Jobs;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace InvoiceBilling.Api.Tests.Infrastructure;
 
@@ -32,6 +34,10 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
 
             foreach (var d in workerDescriptors)
                 services.Remove(d);
+            
+            
+            services.RemoveAll<IInvoicePdfJobEnqueuer>();
+            services.AddSingleton<IInvoicePdfJobEnqueuer, NoOpInvoicePdfJobEnqueuer>();
 
             // 2) Replace the application's DbContext with an in-memory SQLite DB.
             // Remove existing DbContext registrations first.
@@ -51,6 +57,7 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
 
             services.AddSingleton(_connection);
             services.AddDbContext<InvoiceBillingDbContext>(opt => opt.UseSqlite(_connection));
+
         });
     }
 
