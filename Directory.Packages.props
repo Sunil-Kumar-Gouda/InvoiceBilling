@@ -1,0 +1,50 @@
+<Project>
+  <PropertyGroup>
+    <!-- Central Package Management: versions live here, not in individual *.csproj files -->
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+
+    <!-- Optional (recommended): generate packages.lock.json files for repeatable restores.
+         To fully enforce determinism in CI, commit the generated lock files and switch CI restore to locked-mode. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Core backend (net8) -->
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="8.0.22" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="8.0.22" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.22" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.22" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.22" />
+
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="8.0.22" />
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="8.0.0" />
+
+    <PackageVersion Include="MediatR" Version="14.0.0" />
+    <!-- <PackageVersion Include="MediatR.Extensions.Microsoft.DependencyInjection" Version="11.1.0" /> -->
+
+    <PackageVersion Include="FluentValidation" Version="12.1.1" />
+    <PackageVersion Include="FluentValidation.AspNetCore" Version="11.3.1" />
+
+    <!-- <PackageVersion Include="AutoMapper" Version="16.0.0" />
+    <PackageVersion Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" /> -->
+
+    <!-- AWS SDK -->
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.16" />
+    <PackageVersion Include="AWSSDK.SQS" Version="4.0.2.8" />
+
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="8.0.0" />
+
+    <!-- Testing -->
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.22" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="8.0.22" />
+
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.2" />
+
+    <PackageVersion Include="xunit" Version="2.9.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageVersion Include="FluentAssertions" Version="6.12.0" />
+  </ItemGroup>
+</Project>
