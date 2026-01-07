@@ -3,7 +3,10 @@ set -euo pipefail
 
 echo "Bootstrapping LocalStack resources..."
 
-awslocal s3 mb s3://invoicebilling-invoices || true
-awslocal sqs create-queue --queue-name invoicebilling-jobs >/dev/null || true
+BUCKET_NAME="${INVOICEBILLING_S3_BUCKET:-invoicebilling-invoices}"
+QUEUE_NAME="${INVOICEBILLING_SQS_QUEUE:-invoicebilling-jobs}"
 
-echo "Done: S3 bucket + SQS queue created."
+awslocal s3 mb "s3://${BUCKET_NAME}" || true
+awslocal sqs create-queue --queue-name "${QUEUE_NAME}" >/dev/null || true
+
+echo "Done: S3 bucket + SQS queue created. Bucket=${BUCKET_NAME}, Queue=${QUEUE_NAME}"

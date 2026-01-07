@@ -2,11 +2,20 @@ services:
   localstack:
     image: localstack/localstack:3
     container_name: invoicebilling-localstack
+    restart: unless-stopped
     ports:
       - "4566:4566"
+    env_file:
+      - ./.env.localstack
     environment:
-      - SERVICES=s3,sqs
-      - AWS_DEFAULT_REGION=ap-south-1
+      - SERVICES=${LOCALSTACK_SERVICES:-s3,sqs}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-south-1}
+      - EDGE_PORT=4566
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "curl -fsS http://localhost:4566/_localstack/health | grep -q '\"running\"'"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
     volumes:
       - ./infra/localstack/init:/etc/localstack/init/ready.d:ro
       - /var/run/docker.sock:/var/run/docker.sock
