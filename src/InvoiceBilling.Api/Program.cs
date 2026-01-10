@@ -35,7 +35,11 @@ builder.Services.AddMediatR(cfg =>
     cfg.RegisterServicesFromAssemblyContaining<UpdateDraftInvoiceCommand>());
 
 builder.Services.AddHealthChecks();
-builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
+//builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
+if (builder.Configuration.GetValue<bool>("BackgroundWorkers:InvoicePdfWorker:Enabled"))
+{
+    builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
+}
 
 var app = builder.Build();
 app.UseCors("SpaCors");

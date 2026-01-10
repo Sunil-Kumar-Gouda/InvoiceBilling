@@ -10,7 +10,8 @@ services:
     environment:
       - SERVICES=${LOCALSTACK_SERVICES:-s3,sqs}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-ap-south-1}
-      - EDGE_PORT=4566
+      - SQS_ENDPOINT_STRATEGY=${SQS_ENDPOINT_STRATEGY:-path}
+      - LOCALSTACK_HOST=localhost:4566
     healthcheck:
       test: ["CMD", "bash", "-lc", "curl -fsS http://localhost:4566/_localstack/health | grep -q '\"running\"'"]
       interval: 2s

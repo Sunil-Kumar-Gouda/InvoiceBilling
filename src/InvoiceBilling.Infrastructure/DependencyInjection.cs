@@ -3,6 +3,7 @@ using InvoiceBilling.Application.Common.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Amazon;
 using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.SQS;
@@ -52,19 +53,34 @@ public static class DependencyInjection
         services.AddSingleton<IAmazonS3>(sp =>
         {
             var opt = sp.GetRequiredService<IOptions<AwsOptions>>().Value;
-            var cfg = new AmazonS3Config { ServiceURL = opt.ServiceUrl, ForcePathStyle = true };
+
+            var cfg = new AmazonS3Config
+            {
+                ServiceURL = opt.ServiceUrl,
+                ForcePathStyle = true,
+                //RegionEndpoint = region
+                AuthenticationRegion = opt.Region
+            };
+
             return new AmazonS3Client(new BasicAWSCredentials("test", "test"), cfg);
         });
 
         services.AddSingleton<IAmazonSQS>(sp =>
         {
             var opt = sp.GetRequiredService<IOptions<AwsOptions>>().Value;
-            var cfg = new AmazonSQSConfig { ServiceURL = opt.ServiceUrl };
+
+            var cfg = new AmazonSQSConfig
+            {
+                ServiceURL = opt.ServiceUrl,
+                //RegionEndpoint = region,
+                AuthenticationRegion = opt.Region
+            };
+
             return new AmazonSQSClient(new BasicAWSCredentials("test", "test"), cfg);
         });
+
         services.AddSingleton<IInvoiceTotalsCalculator, InvoiceTotalsCalculator>();
         services.AddSingleton<IInvoicePdfJobEnqueuer, SqsInvoicePdfJobEnqueuer>();
-
 
         return services;
     }
