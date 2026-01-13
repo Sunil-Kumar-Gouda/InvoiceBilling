@@ -1,7 +1,5 @@
 using Amazon.S3;
 using Amazon.S3.Model;
-using Amazon.SQS;
-using Amazon.SQS.Model;
 using InvoiceBilling.Api.Dtos.Invoices;
 using InvoiceBilling.Domain.Entities;
 using InvoiceBilling.Domain.Exceptions;
@@ -12,10 +10,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Net;
-using System.Text.Json;
 using InvoiceBilling.Application.Invoices.UpdateDraftInvoice;
+using InvoiceBilling.Application.Invoices.IssueInvoice;
 using MediatR;
-using InvoiceBilling.Application.Common.Jobs;
 
 namespace InvoiceBilling.Api.Controllers;
 
@@ -23,15 +20,11 @@ namespace InvoiceBilling.Api.Controllers;
 [Route("api/[controller]")]
 public class InvoicesController : ControllerBase
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-
     private readonly InvoiceBillingDbContext _db;
     private readonly IMediator _mediator;
     private readonly AwsOptions _aws;
     private readonly IInvoiceTotalsCalculator _totals;
-    private readonly IAmazonS3 _s3;
-    private readonly IInvoicePdfJobEnqueuer _pdfJobs;
-    private readonly ILogger<InvoicesController> _logger;
+    private readonly IAmazonS3 _s3;    private readonly ILogger<InvoicesController> _logger;
 
     public InvoicesController(
         InvoiceBillingDbContext db,
@@ -39,16 +32,13 @@ public class InvoicesController : ControllerBase
         IAmazonS3 s3,
         IOptions<AwsOptions> awsOptions,
         IInvoiceTotalsCalculator totals,
-        IInvoicePdfJobEnqueuer pdfJobs,
         ILogger<InvoicesController> logger)
     {
         _db = db;
          _mediator = mediator;
         _s3 = s3;
         _aws = awsOptions.Value;
-        _totals = totals;
-        _pdfJobs = pdfJobs;
-        _logger = logger;
+        _totals = totals;        _logger = logger;
     }
 
     // Day 8 (Phase 2): List invoices with basic filters + paging
@@ -121,6 +111,41 @@ public class InvoicesController : ControllerBase
                 statusCode: StatusCodes.Status404NotFound);
 
         return Ok(ToDto(invoice));
+    }
+
+    /// <summary>
+    /// Lightweight endpoint for UI polling (status + PDF readiness) without loading lines.
+    /// </summary>
+    [HttpGet("{id:guid}/status")]
+    public async Task<ActionResult<InvoiceStatusDto>> GetStatus(Guid id, CancellationToken ct)
+    {
+        var state = await _db.Invoices.AsNoTracking()
+            .Where(i => i.Id == id)
+            .Select(i => new { i.Id, i.Status, i.PdfS3Key })
+            .FirstOrDefaultAsync(ct);
+
+        if (state is null)
+            return Problem(
+                title: "Invoice not found",
+                detail: $"Invoice {id} was not found.",
+                statusCode: StatusCodes.Status404NotFound);
+
+        var isIssued = string.Equals(state.Status, InvoiceStatus.Issued, StringComparison.OrdinalIgnoreCase);
+        var pdfStatus = !isIssued
+            ? "NotIssued"
+            : (string.IsNullOrWhiteSpace(state.PdfS3Key) ? "Pending" : "Ready");
+
+        var pdfUrl = pdfStatus == "Ready"
+            ? Url.Action(nameof(DownloadPdf), new { id = state.Id })
+            : null;
+
+        return Ok(new InvoiceStatusDto
+        {
+            Id = state.Id,
+            Status = state.Status,
+            PdfStatus = pdfStatus,
+            PdfDownloadUrl = pdfUrl
+        });
     }
 
     [HttpPost]
@@ -212,54 +237,41 @@ public class InvoicesController : ControllerBase
         }
     }
 
-    [HttpPost("{id:guid}/issue")]
-    public async Task<IActionResult> Issue(Guid id, CancellationToken ct)
+    
+[HttpPost("{id:guid}/issue")]
+public async Task<IActionResult> Issue(Guid id, CancellationToken ct)
+{
+    var result = await _mediator.Send(new IssueInvoiceCommand(InvoiceId: id), ct);
+
+    if (!result.Succeeded)
     {
-        var invoice = await _db.Invoices
-            .Include(i => i.Lines)
-            .FirstOrDefaultAsync(i => i.Id == id, ct);
-
-        if (invoice is null)
-            return Problem(title: "Invoice not found", detail: $"Invoice {id} was not found.", statusCode: 404);
-
-        try
-        {
-            invoice.Issue(DateTime.UtcNow);
-            await _db.SaveChangesAsync(ct);
-        }
-        catch (DomainException ex)
-        {
-            var status = MapDomainExceptionToStatus(ex.Message);
-            return DomainProblem("Domain rule violation", ex.Message, status);
-        }
-
-        if (string.IsNullOrWhiteSpace(_aws?.Sqs?.QueueName))
-            return Problem(title: "Configuration error", detail: "Aws:Sqs:QueueName is missing.", statusCode: 500);
-
-        var jobEnqueued = false;
-
-        try
-        {
-            await _pdfJobs.EnqueueInvoicePdfJobAsync(id, ct);
-            jobEnqueued = true;
-        }
-        catch (Exception ex)
-        {
-            // Important: invoice is already issued and saved. Do not fail the API call due to enqueue failure.
-            _logger.LogError(ex, "Invoice {InvoiceId} issued, but PDF job enqueue failed.", id);
-        }
-
-        return Ok(new
-        {
-            message = jobEnqueued
-                ? "Invoice issued and job enqueued."
-                : "Invoice issued. PDF job enqueue failed or is disabled.",
-            invoiceId = id,
-            jobEnqueued
-        });
+        return Problem(
+            title: result.ErrorTitle ?? "Request failed",
+            detail: result.ErrorDetail ?? "The request could not be completed.",
+            statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
     }
 
-    [HttpGet("{id:guid}/pdf")]
+    var message = result.WasNoOp
+        ? (result.JobEnqueued
+            ? "Invoice already issued. Job enqueued."
+            : "Invoice already issued.")
+        : (result.JobEnqueued
+            ? "Invoice issued and job enqueued."
+            : "Invoice issued. PDF job enqueue failed or is disabled.");
+
+    return Ok(new
+    {
+        message,
+        invoiceId = id,
+        jobEnqueued = result.JobEnqueued,
+        jobEnqueueError = result.JobEnqueueError,
+        wasNoOp = result.WasNoOp,
+        invoice = ToDto(result.Invoice!)
+    });
+}
+
+
+[HttpGet("{id:guid}/pdf")]
     public async Task<IActionResult> DownloadPdf(Guid id, CancellationToken ct)
     {
         var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(i => i.Id == id, ct);

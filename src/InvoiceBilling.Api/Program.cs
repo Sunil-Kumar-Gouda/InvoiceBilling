@@ -1,3 +1,5 @@
+using FluentValidation;
+using InvoiceBilling.Application.Invoices.IssueInvoice;
 using InvoiceBilling.Application.Invoices.UpdateDraftInvoice;
 using InvoiceBilling.Infrastructure;
 var builder = WebApplication.CreateBuilder(args);
@@ -29,6 +31,9 @@ builder.Services.AddSwaggerGen();
 
 // Add Infrastructure (DbContext, etc.)
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
+
+// FluentValidation (CQRS commands)
+builder.Services.AddScoped<IValidator<IssueInvoiceCommand>, IssueInvoiceCommandValidator>();
 
 // CQRS: register MediatR handlers from Application layer
 builder.Services.AddMediatR(cfg =>
