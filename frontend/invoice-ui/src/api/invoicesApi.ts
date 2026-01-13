@@ -1,5 +1,5 @@
 import { http, httpBlob } from "./http";
-import type { CreateInvoiceRequest, InvoiceDto, UpdateInvoiceRequest, GetInvoicesQuery } from "../features/invoices/types";
+import type { CreateInvoiceRequest, InvoiceDto, UpdateInvoiceRequest, GetInvoicesQuery, InvoiceStatusDto, IssueInvoiceResult } from "../features/invoices/types";
 
 function buildQuery(q?: GetInvoicesQuery): string {
   if (!q) return "";
@@ -24,6 +24,10 @@ export function getInvoiceById(id: string): Promise<InvoiceDto> {
   return http<InvoiceDto>(`/api/invoices/${id}`);
 }
 
+export function getInvoiceStatus(id: string): Promise<InvoiceStatusDto> {
+  return http<InvoiceStatusDto>(`/api/invoices/${id}/status`);
+}
+
 export function createInvoice(request: CreateInvoiceRequest): Promise<InvoiceDto> {
   return http<InvoiceDto>("/api/invoices", { method: "POST", body: JSON.stringify(request) });
 }
@@ -32,8 +36,8 @@ export function updateInvoice(id: string, request: UpdateInvoiceRequest): Promis
   return http<InvoiceDto>(`/api/invoices/${id}`, { method: "PUT", body: JSON.stringify(request) });
 }
 
-export function issueInvoice(id: string): Promise<{ message: string; invoiceId: string }> {
-  return http<{ message: string; invoiceId: string }>(`/api/invoices/${id}/issue`, { method: "POST" });
+export function issueInvoice(id: string): Promise<IssueInvoiceResult> {
+  return http<IssueInvoiceResult>(`/api/invoices/${id}/issue`, { method: "POST" });
 }
 
 function tryGetFileNameFromContentDisposition(value: string | null): string | null {

@@ -1,17 +1,53 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import type { Customer } from "../customers/types";
 import type { Product } from "../products/types";
-import type { InvoiceDto } from "./types";
+import type { InvoiceDto, InvoicePdfStatus, InvoiceStatusDto } from "./types";
 
 import { getCustomers } from "../../api/customersApi";
 import { getProducts } from "../../api/productsApi";
-import { downloadInvoiceFile, getInvoiceById, issueInvoice } from "../../api/invoicesApi";
+import { downloadInvoiceFile, getInvoiceById, getInvoiceStatus, issueInvoice } from "../../api/invoicesApi";
 import { ApiError } from "../../api/types";
 
 function fmtDate(iso: string): string {
   return iso?.length >= 10 ? iso.substring(0, 10) : iso;
+}
+
+function statusPillStyle(status: string): CSSProperties {
+  const base: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "2px 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    border: "1px solid #ddd",
+    background: "#fafafa",
+    lineHeight: 1.6,
+  };
+
+  if (status === "Draft") return { ...base, borderColor: "#c7d2fe", background: "#eef2ff" };
+  if (status === "Issued") return { ...base, borderColor: "#bbf7d0", background: "#f0fdf4" };
+  if (status === "Paid") return { ...base, borderColor: "#a7f3d0", background: "#ecfdf5" };
+  if (status === "Overdue") return { ...base, borderColor: "#fecaca", background: "#fef2f2" };
+  return base;
+}
+
+function pdfPillStyle(pdfStatus: InvoicePdfStatus): CSSProperties {
+  const base: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: "2px 10px",
+    borderRadius: 999,
+    fontSize: 12,
+    border: "1px solid #ddd",
+    background: "#fafafa",
+    lineHeight: 1.6,
+  };
+
+  if (pdfStatus === "Ready") return { ...base, borderColor: "#bbf7d0", background: "#f0fdf4" };
+  if (pdfStatus === "Pending") return { ...base, borderColor: "#fde68a", background: "#fffbeb" };
+  return { ...base, borderColor: "#e5e7eb", background: "#fafafa" };
 }
 
 export default function InvoiceDetailsPage() {
@@ -23,10 +59,14 @@ export default function InvoiceDetailsPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
 
+  const [statusSnapshot, setStatusSnapshot] = useState<InvoiceStatusDto | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   const [issuing, setIssuing] = useState(false);
+  const [pollingPdf, setPollingPdf] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
   const customerName = useMemo(() => {
@@ -40,6 +80,17 @@ export default function InvoiceDetailsPage() {
     return map;
   }, [products]);
 
+  const pdfStatus: InvoicePdfStatus = useMemo(() => {
+    if (statusSnapshot?.pdfStatus) return statusSnapshot.pdfStatus;
+
+    // Fallback (older backend or transient status endpoint issues)
+    if (!invoice) return "NotIssued";
+    if (invoice.status !== "Issued") return "NotIssued";
+    return invoice.pdfS3Key ? "Ready" : "Pending";
+  }, [invoice, statusSnapshot?.pdfStatus]);
+
+  const canDownload = pdfStatus === "Ready";
+
   const load = async () => {
     if (!invoiceId) return;
 
@@ -51,6 +102,14 @@ export default function InvoiceDetailsPage() {
       setInvoice(inv);
       setCustomers(c);
       setProducts(p);
+
+      try {
+        const st = await getInvoiceStatus(invoiceId);
+        setStatusSnapshot(st);
+      } catch {
+        // Status endpoint is UX-only; do not fail the page load
+        setStatusSnapshot(null);
+      }
     } catch (e: unknown) {
       const msg =
         e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
@@ -70,15 +129,24 @@ export default function InvoiceDetailsPage() {
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   const pollPdfReady = async () => {
-    const timeoutMs = 20_000;
+    if (!invoiceId) return;
+
+    const timeoutMs = 30_000;
     const intervalMs = 2_000;
     const end = Date.now() + timeoutMs;
 
-    while (Date.now() < end) {
-      const inv = await getInvoiceById(invoiceId);
-      setInvoice(inv);
-      if (inv.pdfS3Key) return;
-      await sleep(intervalMs);
+    setPollingPdf(true);
+    try {
+      while (Date.now() < end) {
+        const st = await getInvoiceStatus(invoiceId);
+        setStatusSnapshot(st);
+
+        if (st.pdfStatus === "Ready") return;
+
+        await sleep(intervalMs);
+      }
+    } finally {
+      setPollingPdf(false);
     }
   };
 
@@ -88,10 +156,22 @@ export default function InvoiceDetailsPage() {
     try {
       setIssuing(true);
       setError(null);
-      await issueInvoice(invoice.id);
+      setInfo(null);
+
+      const result = await issueInvoice(invoice.id);
+
+      const baseMsg = result.wasNoOp ? "Invoice was already issued (no-op)." : "Invoice issued.";
+      const queueMsg =
+        result.jobEnqueued === false ? (result.jobEnqueueError ? ` PDF job enqueue failed: ${result.jobEnqueueError}` : " PDF job enqueue failed.") :
+        "";
+      setInfo(`${baseMsg}${queueMsg}`);
 
       await load();
-      await pollPdfReady();
+
+      // After issuing, poll lightweight status endpoint until PDF is ready (or timeout)
+      if ((invoice.status === "Draft" || result.wasNoOp) && pdfStatus !== "Ready") {
+        await pollPdfReady();
+      }
     } catch (e: unknown) {
       const msg =
         e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
@@ -109,6 +189,7 @@ export default function InvoiceDetailsPage() {
     try {
       setDownloading(true);
       setError(null);
+      setInfo(null);
 
       const { blob, fileName } = await downloadInvoiceFile(invoice.id);
       const url = URL.createObjectURL(blob);
@@ -163,6 +244,12 @@ export default function InvoiceDetailsPage() {
         </div>
       )}
 
+      {info && (
+        <div style={{ marginTop: 12, padding: 10, border: "1px solid #bde", background: "#f2f8ff" }}>
+          {info}
+        </div>
+      )}
+
       {loading || !invoice ? (
         <p style={{ marginTop: 12 }}>{loading ? "Loading..." : "Not found."}</p>
       ) : (
@@ -170,7 +257,10 @@ export default function InvoiceDetailsPage() {
           <div style={{ marginTop: 12, padding: 12, border: "1px solid #ddd" }}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
               <div><strong>Invoice:</strong> {invoice.invoiceNumber}</div>
-              <div><strong>Status:</strong> {invoice.status}</div>
+              <div>
+                <strong>Status:</strong>{" "}
+                <span style={statusPillStyle(invoice.status)}>{invoice.status}</span>
+              </div>
               <div><strong>Customer:</strong> {customerName ?? invoice.customerId}</div>
 
               <div><strong>Issue date:</strong> {fmtDate(invoice.issueDate)}</div>
@@ -180,6 +270,12 @@ export default function InvoiceDetailsPage() {
               <div><strong>Subtotal:</strong> {invoice.subtotal.toFixed(2)}</div>
               <div><strong>Tax ({invoice.taxRatePercent.toFixed(2)}%):</strong> {invoice.taxTotal.toFixed(2)}</div>
               <div><strong>Total:</strong> {invoice.grandTotal.toFixed(2)}</div>
+
+              <div style={{ gridColumn: "1 / -1" }}>
+                <strong>PDF:</strong>{" "}
+                <span style={pdfPillStyle(pdfStatus)}>{pdfStatus}</span>
+                {pollingPdf && <span style={{ marginLeft: 8, fontSize: 12 }}>Checking...</span>}
+              </div>
             </div>
 
             <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -187,11 +283,15 @@ export default function InvoiceDetailsPage() {
                 {issuing ? "Issuing..." : "Issue"}
               </button>
 
-              <button type="button" onClick={handleDownload} disabled={downloading || !invoice.pdfS3Key}>
+              <button type="button" onClick={handleDownload} disabled={downloading || !canDownload}>
                 {downloading ? "Downloading..." : "Download"}
               </button>
 
-              {!invoice.pdfS3Key && <span style={{ alignSelf: "center" }}>PDF not ready yet.</span>}
+              {!canDownload && (
+                <span style={{ alignSelf: "center" }}>
+                  {invoice.status !== "Issued" ? "Issue the invoice to generate a PDF." : "PDF is being generated."}
+                </span>
+              )}
             </div>
           </div>
 

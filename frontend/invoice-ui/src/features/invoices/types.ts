@@ -59,3 +59,26 @@ export type GetInvoicesQuery = {
   page?: number;
   pageSize?: number;
 };
+
+export type InvoicePdfStatus = "NotIssued" | "Pending" | "Ready";
+
+export type InvoiceStatusDto = {
+  id: string;
+  status: string;
+  pdfStatus: InvoicePdfStatus;
+  pdfDownloadUrl?: string | null;
+};
+
+export type IssueInvoiceResult = {
+  // Backward compatible with earlier API contract (message + invoiceId)
+  message?: string;
+  invoiceId?: string;
+
+  // Newer contract fields (CQRS/idempotency improvements)
+  wasNoOp?: boolean;
+  jobEnqueued?: boolean;
+  jobEnqueueError?: string | null;
+
+  // Some versions may also return the updated invoice snapshot
+  invoice?: InvoiceDto;
+};

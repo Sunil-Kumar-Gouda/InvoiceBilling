@@ -21,6 +21,7 @@ export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<InvoiceDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   // Filters + paging (minimum usable)
   const [status, setStatus] = useState<string>("");
@@ -41,6 +42,7 @@ export default function InvoicesPage() {
     try {
       setLoading(true);
       setError(null);
+      setInfo(null);
 
       const [c, inv] = await Promise.all([
         getCustomers(),
@@ -74,7 +76,15 @@ export default function InvoicesPage() {
     try {
       setIssuingId(id);
       setError(null);
-      await issueInvoice(id);
+      setInfo(null);
+
+      const result = await issueInvoice(id);
+      const baseMsg = result.wasNoOp ? "Invoice was already issued (no-op)." : "Invoice issued.";
+      const queueMsg =
+        result.jobEnqueued === false ? (result.jobEnqueueError ? ` PDF job enqueue failed: ${result.jobEnqueueError}` : " PDF job enqueue failed.") :
+        "";
+      setInfo(`${baseMsg}${queueMsg}`);
+
       await load();
     } catch (e: unknown) {
       const msg =
@@ -91,6 +101,7 @@ export default function InvoicesPage() {
     try {
       setDownloadingId(id);
       setError(null);
+      setInfo(null);
 
       const { blob, fileName } = await downloadInvoiceFile(id);
       const url = URL.createObjectURL(blob);
@@ -176,6 +187,12 @@ export default function InvoicesPage() {
         </div>
       )}
 
+      {info && (
+        <div style={{ marginTop: 12, padding: 10, border: "1px solid #bde", background: "#f2f8ff" }}>
+          {info}
+        </div>
+      )}
+
       <div style={{ marginTop: 12 }}>
         {loading ? (
           <p>Loading...</p>
@@ -207,7 +224,27 @@ export default function InvoicesPage() {
                     <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
                       {customerNameById.get(inv.customerId) ?? inv.customerId}
                     </td>
-                    <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{inv.status}</td>
+                    <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
+                      {inv.status}
+                      {inv.status === "Issued" && !inv.pdfS3Key && (
+                        <span
+                          style={{
+                            marginLeft: 8,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            padding: "2px 10px",
+                            borderRadius: 999,
+                            fontSize: 12,
+                            border: "1px solid #fde68a",
+                            background: "#fffbeb",
+                            lineHeight: 1.6,
+                          }}
+                          title="PDF is being generated"
+                        >
+                          PDF pending
+                        </span>
+                      )}
+                    </td>
                     <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{fmtDate(inv.issueDate)}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{fmtDate(inv.dueDate)}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #eee", textAlign: "right" }}>
