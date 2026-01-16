@@ -5,6 +5,7 @@ using Amazon.SQS.Model;
 using InvoiceBilling.Domain.Exceptions;
 using InvoiceBilling.Infrastructure.Cloud;
 using InvoiceBilling.Infrastructure.Persistence;
+using InvoiceBilling.Api.Pdf;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Net;
@@ -338,7 +339,9 @@ public sealed class InvoicePdfWorker : BackgroundService
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<InvoiceBillingDbContext>();
 
-            var invoice = await db.Invoices.FirstOrDefaultAsync(i => i.Id == invoiceId, ct);
+            var invoice = await db.Invoices
+                .Include(i => i.Lines)
+                .FirstOrDefaultAsync(i => i.Id == invoiceId, ct);
             if (invoice is null)
             {
                 _logger.LogWarning("Invoice {InvoiceId} not found. Deleting message to avoid retries.", invoiceId);
@@ -360,19 +363,21 @@ public sealed class InvoicePdfWorker : BackgroundService
             var bucket = _aws.S3?.BucketName;
             if (string.IsNullOrWhiteSpace(bucket))
                 throw new InvalidOperationException("Aws:S3:BucketName is missing.");
+            var customer = await db.Customers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == invoice.CustomerId, ct);
 
-            var content = $"Invoice PDF placeholder\nInvoiceId: {invoiceId}\nGeneratedAtUtc: {DateTime.UtcNow:o}\n";
-            var bytes = Encoding.UTF8.GetBytes(content);
+            var pdfBytes = InvoicePdfRenderer.Render(invoice, customer);
 
-            var key = $"invoices/{invoiceId}.txt";
+            var key = $"invoices/{invoiceId}.pdf";
 
-            await using var ms = new MemoryStream(bytes);
+            await using var ms = new MemoryStream(pdfBytes);
             await _s3.PutObjectAsync(new PutObjectRequest
             {
                 BucketName = bucket,
                 Key = key,
                 InputStream = ms,
-                ContentType = "text/plain"
+                ContentType = "application/pdf"
             }, ct);
 
             try
