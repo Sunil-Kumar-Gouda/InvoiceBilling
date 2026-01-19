@@ -35,7 +35,8 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
               t.HasCheckConstraint("CK_Invoices_GrandTotal_NonNegative", "GrandTotal >= 0");
               t.HasCheckConstraint("CK_Invoices_PaidTotal_NonNegative", "PaidTotal >= 0");
               t.HasCheckConstraint("CK_Invoices_BalanceDue_NonNegative", "BalanceDue >= 0");
-              t.HasCheckConstraint("CK_Invoices_PaidTotal_LTE_GrandTotal", "PaidTotal <= GrandTotal");
+              // (SQLite): decimals are stored as TEXT by default; forcing numeric coercion avoids lexicographic comparisons.
+              t.HasCheckConstraint("CK_Invoices_PaidTotal_LTE_GrandTotal", "PaidTotal - GrandTotal <= 0");
        });
 
         // Relationships
