@@ -2,6 +2,9 @@ using Amazon.S3;
 using Amazon.S3.Model;
 using InvoiceBilling.Api.Dtos.Invoices;
 using InvoiceBilling.Api.Dtos.Payments;
+using InvoiceBilling.Application.Invoices.GetInvoiceById;
+using InvoiceBilling.Application.Invoices.GetInvoices;
+using InvoiceBilling.Application.Invoices.GetInvoiceStatus;
 using InvoiceBilling.Application.Invoices.IssueInvoice;
 using InvoiceBilling.Application.Invoices.RecordPayment;
 using InvoiceBilling.Application.Invoices.UpdateDraftInvoice;
@@ -10,11 +13,11 @@ using InvoiceBilling.Domain.Exceptions;
 using InvoiceBilling.Domain.Services;
 using InvoiceBilling.Infrastructure.Cloud;
 using InvoiceBilling.Infrastructure.Persistence;
+using MediatR;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Net;
-using MediatR;
 
 namespace InvoiceBilling.Api.Controllers;
 
@@ -56,84 +59,42 @@ public class InvoicesController : ControllerBase
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
-        page = page < 1 ? 1 : page;
-        pageSize = pageSize < 1 ? 1 : pageSize > 200 ? 200 : pageSize;
+        var result = await _mediator.Send(
+            new GetInvoicesQuery(
+                Status: status,
+                CustomerId: customerId,
+                IssueDateFrom: issueDateFrom,
+                IssueDateTo: issueDateTo,
+                Page: page,
+                PageSize: pageSize),
+            ct);
 
-        var today = DateTime.UtcNow.Date;
-        var q = _db.Invoices.AsNoTracking();
-
-        if (!string.IsNullOrWhiteSpace(status))
+        if (!result.Succeeded)
         {
-            var s = status.Trim();
-
-            if (string.Equals(s, InvoiceStatus.Overdue, StringComparison.OrdinalIgnoreCase))
-            {
-                // Overdue is derived: Issued + DueDate < today + BalanceDue > 0
-                q = q.Where(i => i.Status == InvoiceStatus.Issued && i.DueDate < today && i.BalanceDue > 0);
-            }
-            else if (string.Equals(s, InvoiceStatus.Issued, StringComparison.OrdinalIgnoreCase))
-            {
-                // Exclude derived Overdue from the Issued filter.
-                q = q.Where(i => i.Status == InvoiceStatus.Issued && i.DueDate >= today);
-            }
-            else
-            {
-                q = q.Where(i => i.Status == s);
-            }
+            return Problem(
+                title: result.ErrorTitle ?? "Request failed",
+                detail: result.ErrorDetail ?? "The request could not be completed.",
+                statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
         }
 
-        if (customerId.HasValue && customerId.Value != Guid.Empty)
-            q = q.Where(i => i.CustomerId == customerId.Value);
-
-        if (issueDateFrom.HasValue)
-            q = q.Where(i => i.IssueDate >= issueDateFrom.Value.Date);
-
-        if (issueDateTo.HasValue)
-            q = q.Where(i => i.IssueDate <= issueDateTo.Value.Date);
-
-        var items = await q
-            .OrderByDescending(i => i.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(i => new InvoiceDto
-            {
-                Id = i.Id,
-                InvoiceNumber = i.InvoiceNumber,
-                CustomerId = i.CustomerId,
-                Status = i.Status == InvoiceStatus.Issued && i.DueDate < today && i.BalanceDue > 0
-                    ? InvoiceStatus.Overdue
-                    : i.Status,
-                IssueDate = i.IssueDate,
-                DueDate = i.DueDate,
-                CurrencyCode = i.CurrencyCode,
-                TaxRatePercent = i.TaxRatePercent,
-                Subtotal = i.Subtotal,
-                TaxTotal = i.TaxTotal,
-                GrandTotal = i.GrandTotal,
-                PaidTotal = i.PaidTotal,
-                BalanceDue = i.BalanceDue,
-                PdfS3Key = i.PdfS3Key,
-                CreatedAt = i.CreatedAt
-            })
-            .ToListAsync(ct);
-
+        var items = result.Items.Select(ToDto).ToList();
         return Ok(items);
     }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<InvoiceDto>> GetById(Guid id, CancellationToken ct)
     {
-        var invoice = await _db.Invoices.AsNoTracking()
-            .Include(i => i.Lines)
-            .FirstOrDefaultAsync(i => i.Id == id, ct);
+        var result = await _mediator.Send(new GetInvoiceByIdQuery(id), ct);
 
-        if (invoice is null)
+        if (!result.Succeeded)
+        {
             return Problem(
-                title: "Invoice not found",
-                detail: $"Invoice {id} was not found.",
-                statusCode: StatusCodes.Status404NotFound);
+                title: result.ErrorTitle ?? "Request failed",
+                detail: result.ErrorDetail ?? "The request could not be completed.",
+                statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
+        }
 
-        return Ok(ToDto(invoice));
+        return Ok(ToDto(result.Invoice!));
     }
 
     /// <summary>
@@ -142,25 +103,20 @@ public class InvoicesController : ControllerBase
     [HttpGet("{id:guid}/status")]
     public async Task<ActionResult<InvoiceStatusDto>> GetStatus(Guid id, CancellationToken ct)
     {
-        var today = DateTime.UtcNow.Date;
+        var result = await _mediator.Send(new GetInvoiceStatusQuery(id), ct);
 
-        var state = await _db.Invoices.AsNoTracking()
-            .Where(i => i.Id == id)
-            .Select(i => new { i.Id, i.Status, i.DueDate, i.PaidTotal, i.BalanceDue, i.PdfS3Key })
-            .FirstOrDefaultAsync(ct);
-
-        if (state is null)
+        if (!result.Succeeded)
+        {
             return Problem(
-                title: "Invoice not found",
-                detail: $"Invoice {id} was not found.",
-                statusCode: StatusCodes.Status404NotFound);
+                title: result.ErrorTitle ?? "Request failed",
+                detail: result.ErrorDetail ?? "The request could not be completed.",
+                statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
+        }
 
-        var effectiveStatus = (state.Status == InvoiceStatus.Issued && state.DueDate < today && state.BalanceDue > 0)
-            ? InvoiceStatus.Overdue
-            : state.Status;
+        var state = result.State!;
 
-        var isIssuedOrPaid = string.Equals(state.Status, InvoiceStatus.Issued, StringComparison.OrdinalIgnoreCase)
-                          || string.Equals(state.Status, InvoiceStatus.Paid, StringComparison.OrdinalIgnoreCase);
+        var isIssuedOrPaid = string.Equals(state.RawStatus, InvoiceStatus.Issued, StringComparison.OrdinalIgnoreCase)
+                          || string.Equals(state.RawStatus, InvoiceStatus.Paid, StringComparison.OrdinalIgnoreCase);
 
         var pdfStatus = !isIssuedOrPaid
             ? "NotIssued"
@@ -173,7 +129,7 @@ public class InvoicesController : ControllerBase
         return Ok(new InvoiceStatusDto
         {
             Id = state.Id,
-            Status = effectiveStatus,
+            Status = state.EffectiveStatus,
             PaidTotal = state.PaidTotal,
             BalanceDue = state.BalanceDue,
             PdfStatus = pdfStatus,
@@ -418,6 +374,59 @@ public class InvoicesController : ControllerBase
             InvoiceNumber = invoice.InvoiceNumber,
             CustomerId = invoice.CustomerId,
             Status = effectiveStatus,
+            IssueDate = invoice.IssueDate,
+            DueDate = invoice.DueDate,
+            CurrencyCode = invoice.CurrencyCode,
+            TaxRatePercent = invoice.TaxRatePercent,
+            Subtotal = invoice.Subtotal,
+            TaxTotal = invoice.TaxTotal,
+            GrandTotal = invoice.GrandTotal,
+            PaidTotal = invoice.PaidTotal,
+            BalanceDue = invoice.BalanceDue,
+            PdfS3Key = invoice.PdfS3Key,
+            CreatedAt = invoice.CreatedAt,
+            Lines = invoice.Lines.Select(l => new InvoiceLineDto
+            {
+                Id = l.Id,
+                ProductId = l.ProductId,
+                Description = l.Description,
+                UnitPrice = l.UnitPrice,
+                Quantity = l.Quantity,
+                LineTotal = l.LineTotal
+            }).ToList()
+        };
+    }
+
+    private static InvoiceDto ToDto(InvoiceListItem invoice)
+    {
+        return new InvoiceDto
+        {
+            Id = invoice.Id,
+            InvoiceNumber = invoice.InvoiceNumber,
+            CustomerId = invoice.CustomerId,
+            Status = invoice.Status,
+            IssueDate = invoice.IssueDate,
+            DueDate = invoice.DueDate,
+            CurrencyCode = invoice.CurrencyCode,
+            TaxRatePercent = invoice.TaxRatePercent,
+            Subtotal = invoice.Subtotal,
+            TaxTotal = invoice.TaxTotal,
+            GrandTotal = invoice.GrandTotal,
+            PaidTotal = invoice.PaidTotal,
+            BalanceDue = invoice.BalanceDue,
+            PdfS3Key = invoice.PdfS3Key,
+            CreatedAt = invoice.CreatedAt
+        };
+    }
+
+    private static InvoiceDto ToDto(InvoiceDetails invoice)
+    {
+        return new InvoiceDto
+        {
+            Id = invoice.Id,
+            InvoiceNumber = invoice.InvoiceNumber,
+            CustomerId = invoice.CustomerId,
+            Status = invoice.Status,
             IssueDate = invoice.IssueDate,
             DueDate = invoice.DueDate,
             CurrencyCode = invoice.CurrencyCode,
