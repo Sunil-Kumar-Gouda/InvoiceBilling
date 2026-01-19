@@ -1,6 +1,10 @@
 using Amazon.S3;
 using Amazon.S3.Model;
 using InvoiceBilling.Api.Dtos.Invoices;
+using InvoiceBilling.Api.Dtos.Payments;
+using InvoiceBilling.Application.Invoices.IssueInvoice;
+using InvoiceBilling.Application.Invoices.RecordPayment;
+using InvoiceBilling.Application.Invoices.UpdateDraftInvoice;
 using InvoiceBilling.Domain.Entities;
 using InvoiceBilling.Domain.Exceptions;
 using InvoiceBilling.Domain.Services;
@@ -10,8 +14,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Net;
-using InvoiceBilling.Application.Invoices.UpdateDraftInvoice;
-using InvoiceBilling.Application.Invoices.IssueInvoice;
 using MediatR;
 
 namespace InvoiceBilling.Api.Controllers;
@@ -24,7 +26,8 @@ public class InvoicesController : ControllerBase
     private readonly IMediator _mediator;
     private readonly AwsOptions _aws;
     private readonly IInvoiceTotalsCalculator _totals;
-    private readonly IAmazonS3 _s3;    private readonly ILogger<InvoicesController> _logger;
+    private readonly IAmazonS3 _s3;
+    private readonly ILogger<InvoicesController> _logger;
 
     public InvoicesController(
         InvoiceBillingDbContext db,
@@ -35,10 +38,11 @@ public class InvoicesController : ControllerBase
         ILogger<InvoicesController> logger)
     {
         _db = db;
-         _mediator = mediator;
+        _mediator = mediator;
         _s3 = s3;
         _aws = awsOptions.Value;
-        _totals = totals;        _logger = logger;
+        _totals = totals;
+        _logger = logger;
     }
 
     // Day 8 (Phase 2): List invoices with basic filters + paging
@@ -55,12 +59,27 @@ public class InvoicesController : ControllerBase
         page = page < 1 ? 1 : page;
         pageSize = pageSize < 1 ? 1 : pageSize > 200 ? 200 : pageSize;
 
+        var today = DateTime.UtcNow.Date;
         var q = _db.Invoices.AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(status))
         {
             var s = status.Trim();
-            q = q.Where(i => i.Status == s);
+
+            if (string.Equals(s, InvoiceStatus.Overdue, StringComparison.OrdinalIgnoreCase))
+            {
+                // Overdue is derived: Issued + DueDate < today + BalanceDue > 0
+                q = q.Where(i => i.Status == InvoiceStatus.Issued && i.DueDate < today && i.BalanceDue > 0);
+            }
+            else if (string.Equals(s, InvoiceStatus.Issued, StringComparison.OrdinalIgnoreCase))
+            {
+                // Exclude derived Overdue from the Issued filter.
+                q = q.Where(i => i.Status == InvoiceStatus.Issued && i.DueDate >= today);
+            }
+            else
+            {
+                q = q.Where(i => i.Status == s);
+            }
         }
 
         if (customerId.HasValue && customerId.Value != Guid.Empty)
@@ -81,7 +100,9 @@ public class InvoicesController : ControllerBase
                 Id = i.Id,
                 InvoiceNumber = i.InvoiceNumber,
                 CustomerId = i.CustomerId,
-                Status = i.Status,
+                Status = i.Status == InvoiceStatus.Issued && i.DueDate < today && i.BalanceDue > 0
+                    ? InvoiceStatus.Overdue
+                    : i.Status,
                 IssueDate = i.IssueDate,
                 DueDate = i.DueDate,
                 CurrencyCode = i.CurrencyCode,
@@ -89,6 +110,8 @@ public class InvoicesController : ControllerBase
                 Subtotal = i.Subtotal,
                 TaxTotal = i.TaxTotal,
                 GrandTotal = i.GrandTotal,
+                PaidTotal = i.PaidTotal,
+                BalanceDue = i.BalanceDue,
                 PdfS3Key = i.PdfS3Key,
                 CreatedAt = i.CreatedAt
             })
@@ -119,9 +142,11 @@ public class InvoicesController : ControllerBase
     [HttpGet("{id:guid}/status")]
     public async Task<ActionResult<InvoiceStatusDto>> GetStatus(Guid id, CancellationToken ct)
     {
+        var today = DateTime.UtcNow.Date;
+
         var state = await _db.Invoices.AsNoTracking()
             .Where(i => i.Id == id)
-            .Select(i => new { i.Id, i.Status, i.PdfS3Key })
+            .Select(i => new { i.Id, i.Status, i.DueDate, i.PaidTotal, i.BalanceDue, i.PdfS3Key })
             .FirstOrDefaultAsync(ct);
 
         if (state is null)
@@ -130,8 +155,14 @@ public class InvoicesController : ControllerBase
                 detail: $"Invoice {id} was not found.",
                 statusCode: StatusCodes.Status404NotFound);
 
-        var isIssued = string.Equals(state.Status, InvoiceStatus.Issued, StringComparison.OrdinalIgnoreCase);
-        var pdfStatus = !isIssued
+        var effectiveStatus = (state.Status == InvoiceStatus.Issued && state.DueDate < today && state.BalanceDue > 0)
+            ? InvoiceStatus.Overdue
+            : state.Status;
+
+        var isIssuedOrPaid = string.Equals(state.Status, InvoiceStatus.Issued, StringComparison.OrdinalIgnoreCase)
+                          || string.Equals(state.Status, InvoiceStatus.Paid, StringComparison.OrdinalIgnoreCase);
+
+        var pdfStatus = !isIssuedOrPaid
             ? "NotIssued"
             : (string.IsNullOrWhiteSpace(state.PdfS3Key) ? "Pending" : "Ready");
 
@@ -142,7 +173,9 @@ public class InvoicesController : ControllerBase
         return Ok(new InvoiceStatusDto
         {
             Id = state.Id,
-            Status = state.Status,
+            Status = effectiveStatus,
+            PaidTotal = state.PaidTotal,
+            BalanceDue = state.BalanceDue,
             PdfStatus = pdfStatus,
             PdfDownloadUrl = pdfUrl
         });
@@ -237,41 +270,105 @@ public class InvoicesController : ControllerBase
         }
     }
 
-    
-[HttpPost("{id:guid}/issue")]
-public async Task<IActionResult> Issue(Guid id, CancellationToken ct)
-{
-    var result = await _mediator.Send(new IssueInvoiceCommand(InvoiceId: id), ct);
-
-    if (!result.Succeeded)
+    [HttpPost("{id:guid}/issue")]
+    public async Task<IActionResult> Issue(Guid id, CancellationToken ct)
     {
-        return Problem(
-            title: result.ErrorTitle ?? "Request failed",
-            detail: result.ErrorDetail ?? "The request could not be completed.",
-            statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
+        var result = await _mediator.Send(new IssueInvoiceCommand(InvoiceId: id), ct);
+
+        if (!result.Succeeded)
+        {
+            return Problem(
+                title: result.ErrorTitle ?? "Request failed",
+                detail: result.ErrorDetail ?? "The request could not be completed.",
+                statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
+        }
+
+        var message = result.WasNoOp
+            ? (result.JobEnqueued
+                ? "Invoice already issued. Job enqueued."
+                : "Invoice already issued.")
+            : (result.JobEnqueued
+                ? "Invoice issued and job enqueued."
+                : "Invoice issued. PDF job enqueue failed or is disabled.");
+
+        return Ok(new
+        {
+            message,
+            invoiceId = id,
+            jobEnqueued = result.JobEnqueued,
+            jobEnqueueError = result.JobEnqueueError,
+            wasNoOp = result.WasNoOp,
+            invoice = ToDto(result.Invoice!)
+        });
     }
 
-    var message = result.WasNoOp
-        ? (result.JobEnqueued
-            ? "Invoice already issued. Job enqueued."
-            : "Invoice already issued.")
-        : (result.JobEnqueued
-            ? "Invoice issued and job enqueued."
-            : "Invoice issued. PDF job enqueue failed or is disabled.");
-
-    return Ok(new
+    // Day 13: Payments
+    [HttpGet("{id:guid}/payments")]
+    public async Task<ActionResult<IReadOnlyList<PaymentDto>>> GetPayments(Guid id, CancellationToken ct)
     {
-        message,
-        invoiceId = id,
-        jobEnqueued = result.JobEnqueued,
-        jobEnqueueError = result.JobEnqueueError,
-        wasNoOp = result.WasNoOp,
-        invoice = ToDto(result.Invoice!)
-    });
-}
+        var exists = await _db.Invoices.AsNoTracking().AnyAsync(i => i.Id == id, ct);
+        if (!exists)
+            return Problem(title: "Invoice not found", detail: $"Invoice {id} was not found.", statusCode: 404);
 
+        var items = await _db.Payments.AsNoTracking()
+            .Where(p => p.InvoiceId == id)
+            .OrderByDescending(p => p.PaidAt)
+            .Select(p => new PaymentDto
+            {
+                Id = p.Id,
+                InvoiceId = p.InvoiceId,
+                Amount = p.Amount,
+                PaidAt = p.PaidAt,
+                Method = p.Method,
+                Reference = p.Reference,
+                Note = p.Note,
+                CreatedAt = p.CreatedAt
+            })
+            .ToListAsync(ct);
 
-[HttpGet("{id:guid}/pdf")]
+        return Ok(items);
+    }
+
+    [HttpPost("{id:guid}/payments")]
+    public async Task<IActionResult> RecordPayment(Guid id, [FromBody] RecordPaymentRequest request, CancellationToken ct)
+    {
+        var cmd = new RecordPaymentCommand(
+            InvoiceId: id,
+            Amount: request.Amount,
+            PaidAtUtc: request.PaidAtUtc,
+            Method: request.Method,
+            Reference: request.Reference,
+            Note: request.Note);
+
+        var result = await _mediator.Send(cmd, ct);
+
+        if (!result.Succeeded)
+        {
+            return Problem(
+                title: result.ErrorTitle ?? "Request failed",
+                detail: result.ErrorDetail ?? "The request could not be completed.",
+                statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
+        }
+
+        return Ok(new
+        {
+            message = "Payment recorded.",
+            invoice = ToDto(result.Invoice!),
+            payment = new PaymentDto
+            {
+                Id = result.Payment!.Id,
+                InvoiceId = result.Payment.InvoiceId,
+                Amount = result.Payment.Amount,
+                PaidAt = result.Payment.PaidAt,
+                Method = result.Payment.Method,
+                Reference = result.Payment.Reference,
+                Note = result.Payment.Note,
+                CreatedAt = result.Payment.CreatedAt
+            }
+        });
+    }
+
+    [HttpGet("{id:guid}/pdf")]
     public async Task<IActionResult> DownloadPdf(Guid id, CancellationToken ct)
     {
         var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(i => i.Id == id, ct);
@@ -308,21 +405,19 @@ public async Task<IActionResult> Issue(Guid id, CancellationToken ct)
         }
     }
 
-    private static string? NormalizeCurrency(string? currencyCode)
-    {
-        var cc = (currencyCode ?? "").Trim().ToUpperInvariant();
-        if (string.IsNullOrWhiteSpace(cc)) cc = "INR";
-        return cc.Length == 3 ? cc : null;
-    }
-
     private static InvoiceDto ToDto(Invoice invoice)
     {
+        var today = DateTime.UtcNow.Date;
+        var effectiveStatus = (invoice.Status == InvoiceStatus.Issued && invoice.DueDate < today && invoice.BalanceDue > 0)
+            ? InvoiceStatus.Overdue
+            : invoice.Status;
+
         return new InvoiceDto
         {
             Id = invoice.Id,
             InvoiceNumber = invoice.InvoiceNumber,
             CustomerId = invoice.CustomerId,
-            Status = invoice.Status,
+            Status = effectiveStatus,
             IssueDate = invoice.IssueDate,
             DueDate = invoice.DueDate,
             CurrencyCode = invoice.CurrencyCode,
@@ -330,6 +425,8 @@ public async Task<IActionResult> Issue(Guid id, CancellationToken ct)
             Subtotal = invoice.Subtotal,
             TaxTotal = invoice.TaxTotal,
             GrandTotal = invoice.GrandTotal,
+            PaidTotal = invoice.PaidTotal,
+            BalanceDue = invoice.BalanceDue,
             PdfS3Key = invoice.PdfS3Key,
             CreatedAt = invoice.CreatedAt,
             Lines = invoice.Lines.Select(l => new InvoiceLineDto
@@ -361,14 +458,8 @@ public async Task<IActionResult> Issue(Guid id, CancellationToken ct)
     private IActionResult Problem404(string title, string detail) =>
         Problem(title: title, detail: detail, statusCode: StatusCodes.Status404NotFound);
 
-    private IActionResult Problem400(string title, string detail) =>
-        Problem(title: title, detail: detail, statusCode: StatusCodes.Status400BadRequest);
-
-    private IActionResult Problem500(string title, string detail) =>
-        Problem(title: title, detail: detail, statusCode: StatusCodes.Status500InternalServerError);
-
     private ObjectResult DomainProblem(string title, string detail, int statusCode) =>
-    Problem(title: title, detail: detail, statusCode: statusCode);
+        Problem(title: title, detail: detail, statusCode: statusCode);
 
     private int MapDomainExceptionToStatus(string message)
     {

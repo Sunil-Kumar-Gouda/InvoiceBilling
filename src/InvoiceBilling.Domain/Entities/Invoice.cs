@@ -25,6 +25,10 @@ public sealed class Invoice
     public decimal TaxTotal { get; private set; }
     public decimal GrandTotal { get; private set; }
 
+    // Day 13: Payments
+    public decimal PaidTotal { get; private set; }
+    public decimal BalanceDue { get; private set; }
+
     public string? PdfS3Key { get; private set; }
 
     public DateTime CreatedAt { get; private set; }
@@ -129,15 +133,71 @@ public sealed class Invoice
         RecalculateTotals();
     }
 
+    /// <summary>
+    /// Records a payment against this invoice.
+    /// Business rules:
+    /// - Only Issued invoices can be paid (Draft/Void/Paid are rejected).
+    /// - Payment amount must be > 0.
+    /// - Payment cannot exceed BalanceDue.
+    /// - When BalanceDue becomes 0, invoice transitions to Paid.
+    /// </summary>
+    public Payment RecordPayment(decimal amount, DateTime paidAtUtc, string? method, string? reference, string? note)
+    {
+        var status = Status ?? string.Empty;
+
+        if (string.Equals(status, InvoiceStatus.Draft, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("Cannot record payment for Draft invoices.");
+
+        if (string.Equals(status, InvoiceStatus.Void, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("Cannot record payment for Void invoices.");
+
+        if (string.Equals(status, InvoiceStatus.Paid, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException("Invoice is already Paid.");
+
+        if (!string.Equals(status, InvoiceStatus.Issued, StringComparison.OrdinalIgnoreCase))
+            throw new DomainException($"Cannot record payment when invoice is in '{status}' state.");
+
+        var amt = RoundMoney(amount);
+        if (amt <= 0) throw new DomainException("Payment amount must be > 0.");
+
+        if (BalanceDue <= 0)
+            throw new DomainException("Invoice has no balance due.");
+
+        if (amt > BalanceDue)
+            throw new DomainException("Payment cannot exceed BalanceDue.");
+
+        PaidTotal = RoundMoney(PaidTotal + amt);
+        BalanceDue = RoundMoney(GrandTotal - PaidTotal);
+
+        // Guard against -0.00 due to rounding.
+        if (BalanceDue < 0) BalanceDue = 0m;
+
+        if (BalanceDue == 0m)
+            Status = InvoiceStatus.Paid;
+
+        return Payment.Create(
+            id: Guid.NewGuid(),
+            invoiceId: Id,
+            amount: amt,
+            paidAtUtc: paidAtUtc,
+            method: method,
+            reference: reference,
+            note: note,
+            createdAtUtc: DateTime.UtcNow);
+    }
+
     public void AttachPdf(string s3Key)
     {
         var key = (s3Key ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(key))
             throw new DomainException("PdfS3Key is required.");
 
-        // Business rule: PDF should only be attached after issuing
-        if (!string.Equals(Status, InvoiceStatus.Issued, StringComparison.OrdinalIgnoreCase))
-            throw new DomainException("PDF can be attached only for Issued invoices.");
+        // Business rule: PDF should only be attached after issuing (or after it becomes Paid).
+        var attachable = string.Equals(Status, InvoiceStatus.Issued, StringComparison.OrdinalIgnoreCase)
+                      || string.Equals(Status, InvoiceStatus.Paid, StringComparison.OrdinalIgnoreCase);
+
+        if (!attachable)
+            throw new DomainException("PDF can be attached only for Issued or Paid invoices.");
 
         // Business rule: do not overwrite an existing attachment
         if (!string.IsNullOrWhiteSpace(PdfS3Key))
@@ -170,6 +230,10 @@ public sealed class Invoice
         Subtotal = RoundMoney(rawSubtotal);
         TaxTotal = RoundMoney(Subtotal * (TaxRatePercent / 100m));
         GrandTotal = RoundMoney(Subtotal + TaxTotal);
+
+        // Keep payments-derived aggregates consistent.
+        BalanceDue = RoundMoney(GrandTotal - PaidTotal);
+        if (BalanceDue < 0) BalanceDue = 0m;
     }
 
     private static decimal RoundMoney(decimal value) =>
@@ -188,5 +252,8 @@ public sealed class Invoice
         Subtotal = totals.Subtotal;
         TaxTotal = totals.TaxTotal;
         GrandTotal = totals.GrandTotal;
+
+        BalanceDue = RoundMoney(GrandTotal - PaidTotal);
+        if (BalanceDue < 0) BalanceDue = 0m;
     }
 }

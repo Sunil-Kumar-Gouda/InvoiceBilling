@@ -15,6 +15,7 @@ public class InvoiceBillingDbContext : DbContext, IInvoiceBillingDbContext
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
+    public DbSet<Payment> Payments => Set<Payment>();
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

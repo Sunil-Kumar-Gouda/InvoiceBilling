@@ -20,6 +20,9 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         builder.Property(x => x.TaxTotal).HasPrecision(18, 2);
         builder.Property(x => x.GrandTotal).HasPrecision(18, 2);
 
+        builder.Property(x => x.PaidTotal).HasPrecision(18, 2);
+        builder.Property(x => x.BalanceDue).HasPrecision(18, 2);
+
         builder.Property(x => x.PdfS3Key).HasMaxLength(512);
         builder.Property(x => x.TaxRatePercent).HasPrecision(5, 2);
        
@@ -30,6 +33,9 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
               t.HasCheckConstraint("CK_Invoices_Subtotal_NonNegative", "Subtotal >= 0");
               t.HasCheckConstraint("CK_Invoices_TaxTotal_NonNegative", "TaxTotal >= 0");
               t.HasCheckConstraint("CK_Invoices_GrandTotal_NonNegative", "GrandTotal >= 0");
+              t.HasCheckConstraint("CK_Invoices_PaidTotal_NonNegative", "PaidTotal >= 0");
+              t.HasCheckConstraint("CK_Invoices_BalanceDue_NonNegative", "BalanceDue >= 0");
+              t.HasCheckConstraint("CK_Invoices_PaidTotal_LTE_GrandTotal", "PaidTotal <= GrandTotal");
        });
 
         // Relationships
@@ -48,6 +54,7 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         builder.HasIndex(x => x.CustomerId);
         builder.HasIndex(x => x.Status);
         builder.HasIndex(x => x.IssueDate);
+        builder.HasIndex(x => x.DueDate);
         builder.HasIndex(x => x.CreatedAt);
         builder.HasIndex(x => new { x.CustomerId, x.Status });
 

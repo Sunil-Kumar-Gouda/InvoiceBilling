@@ -16,6 +16,7 @@ public interface IInvoiceBillingDbContext
     DbSet<Customer> Customers { get; }
     DbSet<Invoice> Invoices { get; }
     DbSet<InvoiceLine> InvoiceLines { get; }
+    DbSet<Payment> Payments { get; }
 
     DatabaseFacade Database { get; }
 
