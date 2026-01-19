@@ -8,7 +8,7 @@ import type { InvoiceDto, InvoicePdfStatus, InvoiceStatusDto, PaymentDto, Record
 import { getCustomers } from "../../api/customersApi";
 import { getProducts } from "../../api/productsApi";
 import { downloadInvoiceFile, getInvoiceById, getInvoicePayments, getInvoiceStatus, issueInvoice, recordInvoicePayment } from "../../api/invoicesApi";
-import { ApiError } from "../../api/types";
+import { formatError } from "../../api/errorFormat";
 
 function fmtDate(iso: string): string {
   return iso?.length >= 10 ? iso.substring(0, 10) : iso;
@@ -19,6 +19,16 @@ function fmtDateTime(iso: string): string {
   const s = iso.endsWith("Z") ? iso.slice(0, -1) : iso;
   const core = s.length >= 19 ? s.substring(0, 19) : s;
   return core.replace("T", " ");
+}
+
+function toLocalDateTimeInputValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const min = pad(d.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
 }
 
 function fmtMoney(currencyCode: string, amount: number): string {
@@ -78,13 +88,14 @@ export default function InvoiceDetailsPage() {
   const [recordingPayment, setRecordingPayment] = useState(false);
 
   const [paymentAmount, setPaymentAmount] = useState<string>("");
-  const [paymentDate, setPaymentDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [paymentPaidAtLocal, setPaymentPaidAtLocal] = useState<string>(() => toLocalDateTimeInputValue(new Date()));
   const [paymentMethod, setPaymentMethod] = useState<string>("");
   const [paymentReference, setPaymentReference] = useState<string>("");
   const [paymentNote, setPaymentNote] = useState<string>("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorLines, setErrorLines] = useState<string[] | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
   const [issuing, setIssuing] = useState(false);
@@ -126,6 +137,10 @@ export default function InvoiceDetailsPage() {
     return Math.max(0, invoice.grandTotal - paidTotal);
   }, [invoice, invoice?.balanceDue, invoice?.grandTotal, invoice?.status, paidTotal, statusSnapshot?.balanceDue]);
 
+  const paymentsSorted = useMemo(() => {
+    return [...payments].sort((a, b) => (b.paidAt ?? '').localeCompare(a.paidAt ?? ''));
+  }, [payments]);
+
   const canRecordPayment = !!invoice && invoice.status !== "Draft" && balanceDue > 0;
 
   const load = async () => {
@@ -134,6 +149,7 @@ export default function InvoiceDetailsPage() {
     try {
       setLoading(true);
       setError(null);
+      setErrorLines(null);
 
       const [inv, c, p, pays, st] = await Promise.all([
         getInvoiceById(invoiceId),
@@ -149,11 +165,9 @@ export default function InvoiceDetailsPage() {
       setPayments(pays);
       setStatusSnapshot(st);
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
-        e instanceof Error ? e.message :
-        "Failed to load invoice";
-      setError(msg);
+      const fe = formatError(e);
+      setError(fe.message);
+      setErrorLines(fe.lines ?? null);
     } finally {
       setLoading(false);
     }
@@ -188,12 +202,27 @@ export default function InvoiceDetailsPage() {
     }
   };
 
+  const refreshAfterPayment = async () => {
+    if (!invoiceId) return;
+
+    const [inv, pays, st] = await Promise.all([
+      getInvoiceById(invoiceId),
+      getInvoicePayments(invoiceId).catch((): PaymentDto[] => []),
+      getInvoiceStatus(invoiceId).catch((): InvoiceStatusDto | null => null),
+    ]);
+
+    setInvoice(inv);
+    setPayments(pays);
+    setStatusSnapshot(st);
+  };
+
   const handleIssue = async () => {
     if (!invoice) return;
 
     try {
       setIssuing(true);
       setError(null);
+      setErrorLines(null);
       setInfo(null);
 
       const result = await issueInvoice(invoice.id);
@@ -211,11 +240,9 @@ export default function InvoiceDetailsPage() {
         await pollPdfReady();
       }
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
-        e instanceof Error ? e.message :
-        "Failed to issue invoice";
-      setError(msg);
+      const fe = formatError(e);
+      setError(fe.message);
+      setErrorLines(fe.lines ?? null);
     } finally {
       setIssuing(false);
     }
@@ -227,6 +254,7 @@ export default function InvoiceDetailsPage() {
     try {
       setDownloading(true);
       setError(null);
+      setErrorLines(null);
       setInfo(null);
 
       const { blob, fileName } = await downloadInvoiceFile(invoice.id);
@@ -240,11 +268,9 @@ export default function InvoiceDetailsPage() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
-        e instanceof Error ? e.message :
-        "Failed to download invoice";
-      setError(msg);
+      const fe = formatError(e);
+      setError(fe.message);
+      setErrorLines(fe.lines ?? null);
     } finally {
       setDownloading(false);
     }
@@ -256,15 +282,19 @@ export default function InvoiceDetailsPage() {
     const amt = Number(paymentAmount);
     if (!Number.isFinite(amt) || amt <= 0) {
       setError("Payment amount must be greater than 0.");
+      setErrorLines(null);
+      setInfo(null);
       return;
     }
 
     if (amt > balanceDue + 1e-9) {
       setError("Payment amount cannot exceed Balance Due.");
+      setErrorLines(null);
+      setInfo(null);
       return;
     }
 
-    const paidAtUtc = paymentDate ? `${paymentDate}T00:00:00Z` : new Date().toISOString();
+    const paidAtUtc = paymentPaidAtLocal ? new Date(paymentPaidAtLocal).toISOString() : new Date().toISOString();
 
     const method = paymentMethod.trim();
     const reference = paymentReference.trim();
@@ -281,29 +311,22 @@ export default function InvoiceDetailsPage() {
     try {
       setRecordingPayment(true);
       setError(null);
+      setErrorLines(null);
       setInfo(null);
 
       const result = await recordInvoicePayment(invoice.id, request);
       setInfo(result.message ?? "Payment recorded.");
-      setInvoice(result.invoice);
-
-      const [pays, st] = await Promise.all([
-        getInvoicePayments(invoice.id).catch((): PaymentDto[] => []),
-        getInvoiceStatus(invoice.id).catch((): InvoiceStatusDto | null => null),
-      ]);
-      setPayments(pays);
-      setStatusSnapshot(st);
+      await refreshAfterPayment();
 
       setPaymentAmount("");
+      setPaymentPaidAtLocal(toLocalDateTimeInputValue(new Date()));
       setPaymentMethod("");
       setPaymentReference("");
       setPaymentNote("");
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
-        e instanceof Error ? e.message :
-        "Failed to record payment";
-      setError(msg);
+      const fe = formatError(e);
+      setError(fe.message);
+      setErrorLines(fe.lines ?? null);
     } finally {
       setRecordingPayment(false);
     }
@@ -338,7 +361,12 @@ export default function InvoiceDetailsPage() {
 
       {error && (
         <div style={{ marginTop: 12, padding: 10, border: "1px solid #f3b", background: "#fff5f8" }}>
-          {error}
+          <div>{error}</div>
+          {errorLines && errorLines.length > 0 && (
+            <ul style={{ margin: "8px 0 0 18px" }}>
+              {errorLines.map((l, i) => (<li key={i}>{l}</li>))}
+            </ul>
+          )}
         </div>
       )}
 
@@ -397,7 +425,7 @@ export default function InvoiceDetailsPage() {
             </div>
           </div>
 
-                    <h3 style={{ marginTop: 16 }}>Payments</h3>
+          <h3 style={{ marginTop: 16 }}>Payments</h3>
           {invoice.status === "Draft" ? (
             <p style={{ marginTop: 8 }}>Issue the invoice to start recording payments.</p>
           ) : (
@@ -423,11 +451,12 @@ export default function InvoiceDetailsPage() {
                   </div>
 
                   <div>
-                    <label style={{ display: "block", marginBottom: 6 }}>Paid date</label>
+                    <label style={{ display: "block", marginBottom: 6 }}>Paid at</label>
                     <input
-                      type="date"
-                      value={paymentDate}
-                      onChange={e => setPaymentDate(e.target.value)}
+                      type="datetime-local"
+                      step={60}
+                      value={paymentPaidAtLocal}
+                      onChange={e => setPaymentPaidAtLocal(e.target.value)}
                       style={{ padding: 8, width: "100%" }}
                     />
                   </div>
@@ -492,7 +521,7 @@ export default function InvoiceDetailsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {payments.map(p => (
+                    {paymentsSorted.map(p => (
                       <tr key={p.id}>
                         <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{fmtDateTime(p.paidAt)}</td>
                         <td style={{ padding: 8, borderBottom: "1px solid #eee", textAlign: "right" }}>
@@ -509,7 +538,7 @@ export default function InvoiceDetailsPage() {
             </>
           )}
 
-<h3 style={{ marginTop: 16 }}>Lines</h3>
+          <h3 style={{ marginTop: 16 }}>Lines</h3>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
