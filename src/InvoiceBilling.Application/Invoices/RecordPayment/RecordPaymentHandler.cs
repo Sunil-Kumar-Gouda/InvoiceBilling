@@ -88,11 +88,22 @@ public sealed class RecordPaymentHandler
 
     private static int MapDomainExceptionToStatus(string message)
     {
-        // Treat invalid state transitions and already-paid cases as 409; input/invariant violations as 400.
+        // 409: invalid state transitions; 400: invalid input/invariant violations.
         if (message.Contains("Draft", StringComparison.OrdinalIgnoreCase)) return 409;
         if (message.Contains("Void", StringComparison.OrdinalIgnoreCase)) return 409;
         if (message.Contains("already", StringComparison.OrdinalIgnoreCase)) return 409;
-        if (message.Contains("state", StringComparison.OrdinalIgnoreCase)) return 409;
+
+        // State-based invariant: invoice has nothing left to pay.
+        if (message.Contains("no balance due", StringComparison.OrdinalIgnoreCase)) return 409;
+
+        // Generic invalid state transition.
+        if (message.Contains("Cannot record payment when invoice", StringComparison.OrdinalIgnoreCase)) return 409;
+
+        // Amount and overpay are treated as bad request.
+        if (message.Contains("must be > 0", StringComparison.OrdinalIgnoreCase)) return 400;
+        if (message.Contains("cannot exceed", StringComparison.OrdinalIgnoreCase)) return 400;
+
         return 400;
     }
+
 }

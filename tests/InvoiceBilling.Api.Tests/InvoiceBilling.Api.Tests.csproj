@@ -24,6 +24,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\InvoiceBilling.Api\InvoiceBilling.Api.csproj" />
+    <ProjectReference Include="..\..\src\InvoiceBilling.Domain\InvoiceBilling.Domain.csproj" />
+    <ProjectReference Include="..\..\src\InvoiceBilling.Infrastructure\InvoiceBilling.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

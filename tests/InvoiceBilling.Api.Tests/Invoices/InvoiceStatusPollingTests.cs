@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using InvoiceBilling.Api.Dtos.Customers;
 using InvoiceBilling.Api.Dtos.Invoices;
+using InvoiceBilling.Api.Dtos.Payments;
 using InvoiceBilling.Api.Dtos.Products;
 using InvoiceBilling.Api.Tests.Infrastructure;
 
@@ -50,6 +51,34 @@ public sealed class InvoiceStatusPollingTests : IClassFixture<TestWebApplication
         Assert.Null(dto.PdfDownloadUrl);
     }
 
+
+
+    [Fact]
+    public async Task GetStatus_ShouldReturnPaidAndPending_WhenInvoicePaidButPdfNotAttachedYet()
+    {
+        var created = await CreateDraftInvoiceAsync();
+
+        var issueResp = await _client.PostAsync($"/api/invoices/{created.Id}/issue", content: null);
+        Assert.Equal(HttpStatusCode.OK, issueResp.StatusCode);
+
+        var payResp = await _client.PostAsJsonAsync($"/api/invoices/{created.Id}/payments", new RecordPaymentRequest
+        {
+            Amount = created.GrandTotal,
+            PaidAtUtc = DateTime.UtcNow,
+            Method = "Cash"
+        });
+        Assert.Equal(HttpStatusCode.OK, payResp.StatusCode);
+
+        var resp = await _client.GetAsync($"/api/invoices/{created.Id}/status");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        var dto = await resp.Content.ReadFromJsonAsync<InvoiceStatusDto>();
+        Assert.NotNull(dto);
+        Assert.Equal("Paid", dto!.Status);
+        Assert.Equal("Pending", dto.PdfStatus);
+        Assert.Equal(0m, dto.BalanceDue);
+        Assert.True(dto.PaidTotal > 0m);
+    }
     private async Task<InvoiceDto> CreateDraftInvoiceAsync()
     {
         // 1) Create customer
