@@ -1,5 +1,5 @@
 import { http, httpBlob } from "./http";
-import type { CreateInvoiceRequest, InvoiceDto, UpdateInvoiceRequest, GetInvoicesQuery, InvoiceStatusDto, IssueInvoiceResult } from "../features/invoices/types";
+import type { CreateInvoiceRequest, InvoiceDto, UpdateInvoiceRequest, GetInvoicesQuery, InvoiceStatusDto, IssueInvoiceResult, PaymentDto, RecordPaymentRequest, RecordPaymentResponse } from "../features/invoices/types";
 
 function buildQuery(q?: GetInvoicesQuery): string {
   if (!q) return "";
@@ -38,6 +38,15 @@ export function updateInvoice(id: string, request: UpdateInvoiceRequest): Promis
 
 export function issueInvoice(id: string): Promise<IssueInvoiceResult> {
   return http<IssueInvoiceResult>(`/api/invoices/${id}/issue`, { method: "POST" });
+}
+
+// Day 13: Payments
+export function getInvoicePayments(id: string): Promise<PaymentDto[]> {
+  return http<PaymentDto[]>(`/api/invoices/${id}/payments`);
+}
+
+export function recordInvoicePayment(id: string, request: RecordPaymentRequest): Promise<RecordPaymentResponse> {
+  return http<RecordPaymentResponse>(`/api/invoices/${id}/payments`, { method: "POST", body: JSON.stringify(request) });
 }
 
 function tryGetFileNameFromContentDisposition(value: string | null): string | null {

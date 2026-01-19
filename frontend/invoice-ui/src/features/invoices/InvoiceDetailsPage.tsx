@@ -3,15 +3,27 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import type { Customer } from "../customers/types";
 import type { Product } from "../products/types";
-import type { InvoiceDto, InvoicePdfStatus, InvoiceStatusDto } from "./types";
+import type { InvoiceDto, InvoicePdfStatus, InvoiceStatusDto, PaymentDto, RecordPaymentRequest } from "./types";
 
 import { getCustomers } from "../../api/customersApi";
 import { getProducts } from "../../api/productsApi";
-import { downloadInvoiceFile, getInvoiceById, getInvoiceStatus, issueInvoice } from "../../api/invoicesApi";
+import { downloadInvoiceFile, getInvoiceById, getInvoicePayments, getInvoiceStatus, issueInvoice, recordInvoicePayment } from "../../api/invoicesApi";
 import { ApiError } from "../../api/types";
 
 function fmtDate(iso: string): string {
   return iso?.length >= 10 ? iso.substring(0, 10) : iso;
+}
+
+function fmtDateTime(iso: string): string {
+  if (!iso) return "";
+  const s = iso.endsWith("Z") ? iso.slice(0, -1) : iso;
+  const core = s.length >= 19 ? s.substring(0, 19) : s;
+  return core.replace("T", " ");
+}
+
+function fmtMoney(currencyCode: string, amount: number): string {
+  const n = Number.isFinite(amount) ? amount : 0;
+  return `${currencyCode} ${n.toFixed(2)}`;
 }
 
 function statusPillStyle(status: string): CSSProperties {
@@ -61,6 +73,16 @@ export default function InvoiceDetailsPage() {
 
   const [statusSnapshot, setStatusSnapshot] = useState<InvoiceStatusDto | null>(null);
 
+  // Day 13: Payments
+  const [payments, setPayments] = useState<PaymentDto[]>([]);
+  const [recordingPayment, setRecordingPayment] = useState(false);
+
+  const [paymentAmount, setPaymentAmount] = useState<string>("");
+  const [paymentDate, setPaymentDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [paymentMethod, setPaymentMethod] = useState<string>("");
+  const [paymentReference, setPaymentReference] = useState<string>("");
+  const [paymentNote, setPaymentNote] = useState<string>("");
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -85,11 +107,26 @@ export default function InvoiceDetailsPage() {
 
     // Fallback (older backend or transient status endpoint issues)
     if (!invoice) return "NotIssued";
-    if (invoice.status !== "Issued") return "NotIssued";
+    if (invoice.status === "Draft") return "NotIssued";
     return invoice.pdfS3Key ? "Ready" : "Pending";
   }, [invoice, statusSnapshot?.pdfStatus]);
 
   const canDownload = pdfStatus === "Ready";
+
+  const paidTotal = useMemo(() => {
+    const v = invoice?.paidTotal ?? statusSnapshot?.paidTotal;
+    return typeof v === "number" && Number.isFinite(v) ? v : 0;
+  }, [invoice?.paidTotal, statusSnapshot?.paidTotal]);
+
+  const balanceDue = useMemo(() => {
+    const v = invoice?.balanceDue ?? statusSnapshot?.balanceDue;
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (!invoice) return 0;
+    if (invoice.status === "Paid") return 0;
+    return Math.max(0, invoice.grandTotal - paidTotal);
+  }, [invoice, invoice?.balanceDue, invoice?.grandTotal, invoice?.status, paidTotal, statusSnapshot?.balanceDue]);
+
+  const canRecordPayment = !!invoice && invoice.status !== "Draft" && balanceDue > 0;
 
   const load = async () => {
     if (!invoiceId) return;
@@ -98,18 +135,19 @@ export default function InvoiceDetailsPage() {
       setLoading(true);
       setError(null);
 
-      const [inv, c, p] = await Promise.all([getInvoiceById(invoiceId), getCustomers(), getProducts()]);
+      const [inv, c, p, pays, st] = await Promise.all([
+        getInvoiceById(invoiceId),
+        getCustomers(),
+        getProducts(),
+        getInvoicePayments(invoiceId).catch((): PaymentDto[] => []),
+        getInvoiceStatus(invoiceId).catch((): InvoiceStatusDto | null => null),
+      ]);
+
       setInvoice(inv);
       setCustomers(c);
       setProducts(p);
-
-      try {
-        const st = await getInvoiceStatus(invoiceId);
-        setStatusSnapshot(st);
-      } catch {
-        // Status endpoint is UX-only; do not fail the page load
-        setStatusSnapshot(null);
-      }
+      setPayments(pays);
+      setStatusSnapshot(st);
     } catch (e: unknown) {
       const msg =
         e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
@@ -212,6 +250,66 @@ export default function InvoiceDetailsPage() {
     }
   };
 
+  const handleRecordPayment = async () => {
+    if (!invoice) return;
+
+    const amt = Number(paymentAmount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setError("Payment amount must be greater than 0.");
+      return;
+    }
+
+    if (amt > balanceDue + 1e-9) {
+      setError("Payment amount cannot exceed Balance Due.");
+      return;
+    }
+
+    const paidAtUtc = paymentDate ? `${paymentDate}T00:00:00Z` : new Date().toISOString();
+
+    const method = paymentMethod.trim();
+    const reference = paymentReference.trim();
+    const note = paymentNote.trim();
+
+    const request: RecordPaymentRequest = {
+      amount: amt,
+      paidAtUtc,
+      ...(method ? { method } : {}),
+      ...(reference ? { reference } : {}),
+      ...(note ? { note } : {}),
+    };
+
+    try {
+      setRecordingPayment(true);
+      setError(null);
+      setInfo(null);
+
+      const result = await recordInvoicePayment(invoice.id, request);
+      setInfo(result.message ?? "Payment recorded.");
+      setInvoice(result.invoice);
+
+      const [pays, st] = await Promise.all([
+        getInvoicePayments(invoice.id).catch((): PaymentDto[] => []),
+        getInvoiceStatus(invoice.id).catch((): InvoiceStatusDto | null => null),
+      ]);
+      setPayments(pays);
+      setStatusSnapshot(st);
+
+      setPaymentAmount("");
+      setPaymentMethod("");
+      setPaymentReference("");
+      setPaymentNote("");
+    } catch (e: unknown) {
+      const msg =
+        e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
+        e instanceof Error ? e.message :
+        "Failed to record payment";
+      setError(msg);
+    } finally {
+      setRecordingPayment(false);
+    }
+  };
+
+
   if (!invoiceId) {
     return (
       <div style={{ padding: 16 }}>
@@ -271,6 +369,10 @@ export default function InvoiceDetailsPage() {
               <div><strong>Tax ({invoice.taxRatePercent.toFixed(2)}%):</strong> {invoice.taxTotal.toFixed(2)}</div>
               <div><strong>Total:</strong> {invoice.grandTotal.toFixed(2)}</div>
 
+              <div><strong>Paid:</strong> {invoice.status === "Draft" ? "-" : fmtMoney(invoice.currencyCode, paidTotal)}</div>
+              <div><strong>Balance due:</strong> {invoice.status === "Draft" ? "-" : fmtMoney(invoice.currencyCode, balanceDue)}</div>
+              <div></div>
+
               <div style={{ gridColumn: "1 / -1" }}>
                 <strong>PDF:</strong>{" "}
                 <span style={pdfPillStyle(pdfStatus)}>{pdfStatus}</span>
@@ -289,13 +391,125 @@ export default function InvoiceDetailsPage() {
 
               {!canDownload && (
                 <span style={{ alignSelf: "center" }}>
-                  {invoice.status !== "Issued" ? "Issue the invoice to generate a PDF." : "PDF is being generated."}
+                  {invoice.status === "Draft" ? "Issue the invoice to generate a PDF." : "PDF is being generated."}
                 </span>
               )}
             </div>
           </div>
 
-          <h3 style={{ marginTop: 16 }}>Lines</h3>
+                    <h3 style={{ marginTop: 16 }}>Payments</h3>
+          {invoice.status === "Draft" ? (
+            <p style={{ marginTop: 8 }}>Issue the invoice to start recording payments.</p>
+          ) : (
+            <>
+              <div style={{ marginTop: 12, padding: 12, border: "1px solid #ddd", background: "#fafafa" }}>
+                <h4 style={{ margin: 0 }}>Record payment</h4>
+                <div style={{ marginTop: 8, color: "#555", fontSize: 13 }}>
+                  Balance due: {fmtMoney(invoice.currencyCode, balanceDue)}
+                </div>
+
+                <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  <div>
+                    <label style={{ display: "block", marginBottom: 6 }}>Amount</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={paymentAmount}
+                      onChange={e => setPaymentAmount(e.target.value)}
+                      style={{ padding: 8, width: "100%" }}
+                      placeholder="0.00"
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", marginBottom: 6 }}>Paid date</label>
+                    <input
+                      type="date"
+                      value={paymentDate}
+                      onChange={e => setPaymentDate(e.target.value)}
+                      style={{ padding: 8, width: "100%" }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: "block", marginBottom: 6 }}>Method</label>
+                    <input
+                      type="text"
+                      value={paymentMethod}
+                      onChange={e => setPaymentMethod(e.target.value)}
+                      style={{ padding: 8, width: "100%" }}
+                      placeholder="Cash / UPI / Bank"
+                    />
+                  </div>
+
+                  <div style={{ gridColumn: "1 / span 2" }}>
+                    <label style={{ display: "block", marginBottom: 6 }}>Reference</label>
+                    <input
+                      type="text"
+                      value={paymentReference}
+                      onChange={e => setPaymentReference(e.target.value)}
+                      style={{ padding: 8, width: "100%" }}
+                      placeholder="Txn id / receipt no"
+                    />
+                  </div>
+
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <label style={{ display: "block", marginBottom: 6 }}>Note</label>
+                    <textarea
+                      value={paymentNote}
+                      onChange={e => setPaymentNote(e.target.value)}
+                      style={{ padding: 8, width: "100%" }}
+                      rows={2}
+                      placeholder="Optional"
+                    />
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <button type="button" onClick={handleRecordPayment} disabled={!canRecordPayment || recordingPayment}>
+                    {recordingPayment ? "Recording..." : "Record payment"}
+                  </button>
+                  {!canRecordPayment && (
+                    <span style={{ fontSize: 13, color: "#555" }}>
+                      {balanceDue <= 0 ? "Invoice is fully paid." : "Payments can be recorded after issuing the invoice."}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {payments.length === 0 ? (
+                <p style={{ marginTop: 12 }}>No payments recorded.</p>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Paid At</th>
+                      <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Amount</th>
+                      <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Method</th>
+                      <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Reference</th>
+                      <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payments.map(p => (
+                      <tr key={p.id}>
+                        <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{fmtDateTime(p.paidAt)}</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #eee", textAlign: "right" }}>
+                          {fmtMoney(invoice.currencyCode, p.amount)}
+                        </td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{p.method ?? ""}</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{p.reference ?? ""}</td>
+                        <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{p.note ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
+
+<h3 style={{ marginTop: 16 }}>Lines</h3>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>

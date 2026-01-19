@@ -208,6 +208,7 @@ export default function InvoicesPage() {
                 <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Issue</th>
                 <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Due</th>
                 <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Total</th>
+                <th style={{ textAlign: "right", borderBottom: "1px solid #ddd", padding: 8 }}>Balance Due</th>
                 <th style={{ textAlign: "left", borderBottom: "1px solid #ddd", padding: 8 }}>Actions</th>
               </tr>
             </thead>
@@ -215,6 +216,11 @@ export default function InvoicesPage() {
               {invoices.map(inv => {
                 const canIssue = inv.status === "Draft";
                 const canDownload = !!inv.pdfS3Key;
+
+                const paidTotal = inv.paidTotal ?? 0;
+                const balanceDue = inv.balanceDue ?? (inv.status === "Paid" ? 0 : Math.max(0, inv.grandTotal - paidTotal));
+                const showBalance = inv.status !== "Draft";
+                const pdfPending = (inv.status === "Issued" || inv.status === "Overdue" || inv.status === "Paid") && !inv.pdfS3Key;
 
                 return (
                   <tr key={inv.id}>
@@ -226,7 +232,7 @@ export default function InvoicesPage() {
                     </td>
                     <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
                       {inv.status}
-                      {inv.status === "Issued" && !inv.pdfS3Key && (
+                      {pdfPending && (
                         <span
                           style={{
                             marginLeft: 8,
@@ -249,6 +255,13 @@ export default function InvoicesPage() {
                     <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>{fmtDate(inv.dueDate)}</td>
                     <td style={{ padding: 8, borderBottom: "1px solid #eee", textAlign: "right" }}>
                       {inv.currencyCode} {inv.grandTotal.toFixed(2)}
+                    </td>
+                    <td style={{ padding: 8, borderBottom: "1px solid #eee", textAlign: "right" }}>
+                      {showBalance ? (
+                        <>
+                          {inv.currencyCode} {balanceDue.toFixed(2)}
+                        </>
+                      ) : "-"}
                     </td>
                     <td style={{ padding: 8, borderBottom: "1px solid #eee" }}>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

@@ -44,6 +44,10 @@ export type InvoiceDto = {
   taxTotal: number;
   grandTotal: number;
 
+  // Day 13: Payments (backend may omit these on older versions)
+  paidTotal?: number;
+  balanceDue?: number;
+
   pdfS3Key?: string | null;
   createdAt: string;
 
@@ -67,6 +71,10 @@ export type InvoiceStatusDto = {
   status: string;
   pdfStatus: InvoicePdfStatus;
   pdfDownloadUrl?: string | null;
+
+  // Day 13: Payments (backend may omit these on older versions)
+  paidTotal?: number;
+  balanceDue?: number;
 };
 
 export type IssueInvoiceResult = {
@@ -81,4 +89,30 @@ export type IssueInvoiceResult = {
 
   // Some versions may also return the updated invoice snapshot
   invoice?: InvoiceDto;
+};
+
+// Day 13: Payments
+export type PaymentDto = {
+  id: string;
+  invoiceId: string;
+  amount: number;
+  paidAt: string; // ISO date-time
+  method?: string | null;
+  reference?: string | null;
+  note?: string | null;
+  createdAt: string; // ISO date-time
+};
+
+export type RecordPaymentRequest = {
+  amount: number;
+  paidAtUtc: string; // ISO date-time (UTC)
+  method?: string | null;
+  reference?: string | null;
+  note?: string | null;
+};
+
+export type RecordPaymentResponse = {
+  message?: string;
+  invoice: InvoiceDto;
+  payment: PaymentDto;
 };
