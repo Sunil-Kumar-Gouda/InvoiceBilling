@@ -1,12 +1,9 @@
-using System.Text;
 using FluentValidation;
-using InvoiceBilling.Api.Auth;
+using InvoiceBilling.Api.Features.Auth;
+using InvoiceBilling.Api.Features.Common;
 using InvoiceBilling.Application.Invoices.IssueInvoice;
 using InvoiceBilling.Application.Invoices.UpdateDraftInvoice;
 using InvoiceBilling.Infrastructure;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -26,7 +23,9 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.AddControllers();
+// API error payloads (RFC7807 ProblemDetails + consistent ModelState errors)
+ApiErrorFeatureRegistration.AddApiErrorFeature(builder.Services);
+
 builder.Services.AddEndpointsApiExplorer();
 
 // Swagger (+ JWT Bearer)
@@ -77,58 +76,16 @@ if (builder.Configuration.GetValue<bool>("BackgroundWorkers:InvoicePdfWorker:Ena
     builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
 }
 
-// Auth foundation (JWT)
+// Auth foundation (JWT) + authorization policy wiring
 var authEnabled = builder.Configuration.GetValue<bool>("Auth:Enabled", true);
-
-builder.Services.AddOptions<JwtOptions>()
-    .Bind(builder.Configuration.GetSection(JwtOptions.SectionName));
-
-builder.Services.AddScoped<JwtTokenService>();
-
-if (authEnabled)
-{
-    // Validate JWT config when enabled
-    builder.Services.AddOptions<JwtOptions>()
-        .Validate(o => !string.IsNullOrWhiteSpace(o.SigningKey) && o.SigningKey.Length >= 32,
-            "Jwt:SigningKey must be configured and at least 32 characters.")
-        .ValidateOnStart();
-
-    var jwt = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
-
-    builder.Services
-        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(options =>
-        {
-            options.RequireHttpsMetadata = false;
-            options.SaveToken = true;
-
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidateAudience = true,
-                ValidateLifetime = true,
-                ValidateIssuerSigningKey = true,
-                ValidIssuer = jwt.Issuer,
-                ValidAudience = jwt.Audience,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.SigningKey)),
-                ClockSkew = TimeSpan.FromSeconds(30)
-            };
-        });
-
-    builder.Services.AddAuthorization();
-}
-else
-{
-    // Keep tests frictionless (no auth); still allow [Authorize] in later days.
-    builder.Services.AddAuthorization(options =>
-        options.DefaultPolicy = new AuthorizationPolicyBuilder()
-            .RequireAssertion(_ => true)
-            .Build());
-}
+AuthFeatureRegistration.AddAuthFeature(builder.Services, builder.Configuration, authEnabled);
 
 var app = builder.Build();
 
 app.UseCors("SpaCors");
+
+// ProblemDetails exception mapping middleware
+ApiErrorFeatureRegistration.UseApiErrorFeature(app);
 
 // Swagger
 if (app.Environment.IsDevelopment())
@@ -137,12 +94,8 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-if (authEnabled)
-{
-    app.UseAuthentication();
-}
-
-app.UseAuthorization();
+// Auth pipeline (conditionally enables authentication, always applies authorization)
+AuthFeatureRegistration.UseAuthFeature(app, authEnabled);
 
 app.MapControllers();
 app.MapHealthChecks("/health");
