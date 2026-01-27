@@ -34,6 +34,16 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      # Quality gate: fail CI if C# formatting drifts from the repo baseline.
+      # Developers can fix locally by running: dotnet format
+      - name: Install dotnet-format
+        run: |
+          dotnet tool install -g dotnet-format
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+
+      - name: Dotnet format (verify)
+        run: dotnet format --verify-no-changes --no-restore
+
       - name: Build
         run: dotnet build -c Release --no-restore
 
@@ -56,6 +66,10 @@ jobs:
       - name: Frontend install
         working-directory: frontend/invoice-ui
         run: npm ci
+
+      - name: Frontend lint
+        working-directory: frontend/invoice-ui
+        run: npm run lint
 
       - name: Frontend build
         working-directory: frontend/invoice-ui
