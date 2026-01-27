@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using InvoiceBilling.Application.Common.Jobs;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Configuration;
 
 namespace InvoiceBilling.Api.Tests.Infrastructure;
 
@@ -23,11 +24,20 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment(Environments.Development);
+        //builder.UseEnvironment(Environments.Development);
+        builder.UseEnvironment("Test");
 
+        // This keeps existing tests unchanged and avoids needing to mint JWTs in every test.
+        builder.ConfigureAppConfiguration((_, config) =>
+        {
+            config.AddInMemoryCollection(new[]
+            {
+                new KeyValuePair<string, string?>("Auth:Enabled", "false"),
+            });
+        });
         builder.ConfigureServices(services =>
         {
-            // 1) Disable the hosted worker so tests don't depend on LocalStack / SQS
+            // Disable the hosted worker so tests don't depend on LocalStack / SQS
             var workerDescriptors = services
                 .Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(InvoicePdfWorker))
                 .ToList();
@@ -39,7 +49,7 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<IInvoicePdfJobEnqueuer>();
             services.AddSingleton<IInvoicePdfJobEnqueuer, NoOpInvoicePdfJobEnqueuer>();
 
-            // 2) Replace the application's DbContext with an in-memory SQLite DB.
+            // Replace the application's DbContext with an in-memory SQLite DB.
             // Remove existing DbContext registrations first.
             var dbOptionsDescriptor = services.SingleOrDefault(
                 d => d.ServiceType == typeof(DbContextOptions<InvoiceBillingDbContext>));
