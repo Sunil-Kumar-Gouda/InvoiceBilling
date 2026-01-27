@@ -1,6 +1,7 @@
 import { API_BASE_URL } from "../config";
 import type { ProblemDetails } from "./types";
 import { ApiError } from "./types";
+import { getAccessToken, setAccessToken } from "../auth/tokenStorage";
 
 function buildUrl(path: string): string {
   const base = API_BASE_URL.endsWith("/") ? API_BASE_URL.slice(0, -1) : API_BASE_URL;
@@ -41,6 +42,11 @@ async function tryReadProblemDetails(res: Response): Promise<ProblemDetails | nu
 async function throwApiError(res: Response): Promise<never> {
   const problem = await tryReadProblemDetails(res);
 
+  // Session expired / invalid token: clear local token so UI can re-route to login.
+  if (res.status === 401) {
+    setAccessToken(null);
+  }
+
   let rawBody: string | undefined;
   if (!problem) {
     try {
@@ -70,6 +76,12 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   if (!headers.has("Accept")) headers.set("Accept", "application/json");
   if (shouldSendJson(init) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
 
+  // Attach JWT automatically (if present) unless caller has provided Authorization explicitly.
+  if (!headers.has("Authorization")) {
+    const token = getAccessToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+  }
+
   const res = await fetch(buildUrl(path), { ...init, headers });
 
   if (!res.ok) {
@@ -98,7 +110,13 @@ export async function httpBlob(
   path: string,
   init?: RequestInit
 ): Promise<{ blob: Blob; headers: Headers }> {
-  const res = await fetch(buildUrl(path), init);
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Authorization")) {
+    const token = getAccessToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const res = await fetch(buildUrl(path), { ...init, headers });
 
   if (!res.ok) {
     await throwApiError(res);

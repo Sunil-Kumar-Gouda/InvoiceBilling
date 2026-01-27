@@ -44,14 +44,12 @@ export type InvoiceDto = {
   taxTotal: number;
   grandTotal: number;
 
-  // Day 13: Payments (backend may omit these on older versions)
   paidTotal?: number;
   balanceDue?: number;
 
   pdfS3Key?: string | null;
   createdAt: string;
 
-  // Present for GET /api/invoices/{id}; list endpoint may omit it
   lines?: InvoiceLineDto[];
 };
 
@@ -71,8 +69,6 @@ export type InvoiceStatusDto = {
   status: string;
   pdfStatus: InvoicePdfStatus;
   pdfDownloadUrl?: string | null;
-
-  // Day 13: Payments (backend may omit these on older versions)
   paidTotal?: number;
   balanceDue?: number;
 };
@@ -91,7 +87,6 @@ export type IssueInvoiceResult = {
   invoice?: InvoiceDto;
 };
 
-// Day 13: Payments
 export type PaymentDto = {
   id: string;
   invoiceId: string;

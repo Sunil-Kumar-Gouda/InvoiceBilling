@@ -40,7 +40,6 @@ export function issueInvoice(id: string): Promise<IssueInvoiceResult> {
   return http<IssueInvoiceResult>(`/api/invoices/${id}/issue`, { method: "POST" });
 }
 
-// Day 13: Payments
 export function getInvoicePayments(id: string): Promise<PaymentDto[]> {
   return http<PaymentDto[]>(`/api/invoices/${id}/payments`);
 }

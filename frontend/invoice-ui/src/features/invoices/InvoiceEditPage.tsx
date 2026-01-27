@@ -8,7 +8,8 @@ import type { InvoiceDto, UpdateInvoiceRequest } from "./types";
 
 import { getProducts } from "../../api/productsApi";
 import { getInvoiceById, updateInvoice } from "../../api/invoicesApi";
-import { ApiError } from "../../api/types";
+import { formatError, type ErrorInfo } from "../../api/errorFormat";
+import ErrorBanner from "../../components/ErrorBanner";
 
 type LineFormState = {
   productId: string;
@@ -41,7 +42,7 @@ export default function InvoiceEditPage() {
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorInfo | null>(null);
 
   const productById = useMemo(() => {
     const map = new Map<string, Product>();
@@ -73,11 +74,7 @@ export default function InvoiceEditPage() {
           : [{ ...emptyLine }],
       });
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
-        e instanceof Error ? e.message :
-        "Failed to load invoice";
-      setError(msg);
+      setError(formatError(e));
     } finally {
       setLoading(false);
     }
@@ -162,11 +159,7 @@ export default function InvoiceEditPage() {
 
       navigate(`/invoices/${updated.id}`);
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
-        e instanceof Error ? e.message :
-        "Failed to update invoice";
-      setError(msg);
+      setError(formatError(e));
     } finally {
       setSaving(false);
     }
@@ -195,11 +188,7 @@ export default function InvoiceEditPage() {
         <button type="button" onClick={() => navigate(`/invoices/${invoiceId}`)}>Cancel</button>
       </div>
 
-      {error && (
-        <div style={{ marginTop: 12, padding: 10, border: "1px solid #f3b", background: "#fff5f8" }}>
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
       {loading || !form || !invoice ? (
         <p style={{ marginTop: 12 }}>{loading ? "Loading..." : "Not found."}</p>

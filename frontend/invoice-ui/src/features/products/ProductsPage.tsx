@@ -3,6 +3,8 @@ import type { ChangeEvent, FormEvent } from "react";
 
 import type { Product, CreateProductRequest } from "./types";
 import { getProducts, createProduct, updateProduct, deleteProduct } from "../../api/productsApi";
+import { formatError, type ErrorInfo } from "../../api/errorFormat";
+import ErrorBanner from "../../components/ErrorBanner";
 
 type ProductFormState = {
   name: string;
@@ -32,7 +34,7 @@ function safeFormatMoney(amount: number, currencyCode: string): string {
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorInfo | null>(null);
 
   const [form, setForm] = useState<ProductFormState>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -49,8 +51,7 @@ export default function ProductsPage() {
       const data = await getProducts();
       setProducts(data);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Failed to load products";
-      setError(message);
+      setError(formatError(e));
     } finally {
       setLoading(false);
     }
@@ -93,13 +94,13 @@ export default function ProductsPage() {
 
     const name = form.name.trim();
     if (!name) {
-      setError("Name is required.");
+      setError({ message: "Name is required.", kind: "validation" });
       return;
     }
 
     const unitPriceNumber = Number(form.unitPrice);
     if (!Number.isFinite(unitPriceNumber) || unitPriceNumber < 0) {
-      setError("Unit Price must be a valid number (0 or greater).");
+      setError({ message: "Unit Price must be a valid number (0 or greater).", kind: "validation" });
       return;
     }
 
@@ -139,8 +140,7 @@ export default function ProductsPage() {
 
       cancelEdit();
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Failed to save product";
-      setError(message);
+      setError(formatError(e));
     }
   };
 
@@ -154,8 +154,7 @@ export default function ProductsPage() {
       setProducts(prev => prev.filter(p => p.id !== id));
       if (editingId === id) cancelEdit();
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Failed to delete product";
-      setError(message);
+      setError(formatError(e));
     }
   };
 
@@ -170,11 +169,7 @@ export default function ProductsPage() {
         {loading && <span>Loading...</span>}
       </div>
 
-      {error && (
-        <div style={{ marginBottom: 12, padding: 10, border: "1px solid #f5c2c7", background: "#f8d7da" }}>
-          <strong>Error:</strong> {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
       <form onSubmit={handleSubmit} style={{ marginBottom: 16, padding: 12, border: "1px solid #ddd" }}>
         <h3 style={{ marginTop: 0 }}>{isEditing ? "Edit Product" : "Create Product"}</h3>

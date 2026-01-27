@@ -8,7 +8,8 @@ import type { InvoiceDto, InvoicePdfStatus, InvoiceStatusDto, PaymentDto, Record
 import { getCustomers } from "../../api/customersApi";
 import { getProducts } from "../../api/productsApi";
 import { downloadInvoiceFile, getInvoiceById, getInvoicePayments, getInvoiceStatus, issueInvoice, recordInvoicePayment } from "../../api/invoicesApi";
-import { formatError } from "../../api/errorFormat";
+import { formatError, type ErrorInfo } from "../../api/errorFormat";
+import ErrorBanner from "../../components/ErrorBanner";
 
 function fmtDate(iso: string): string {
   return iso?.length >= 10 ? iso.substring(0, 10) : iso;
@@ -83,7 +84,6 @@ export default function InvoiceDetailsPage() {
 
   const [statusSnapshot, setStatusSnapshot] = useState<InvoiceStatusDto | null>(null);
 
-  // Day 13: Payments
   const [payments, setPayments] = useState<PaymentDto[]>([]);
   const [recordingPayment, setRecordingPayment] = useState(false);
 
@@ -94,8 +94,7 @@ export default function InvoiceDetailsPage() {
   const [paymentNote, setPaymentNote] = useState<string>("");
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [errorLines, setErrorLines] = useState<string[] | null>(null);
+  const [error, setError] = useState<ErrorInfo | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
   const [issuing, setIssuing] = useState(false);
@@ -149,7 +148,6 @@ export default function InvoiceDetailsPage() {
     try {
       setLoading(true);
       setError(null);
-      setErrorLines(null);
 
       const [inv, c, p, pays, st] = await Promise.all([
         getInvoiceById(invoiceId),
@@ -165,9 +163,7 @@ export default function InvoiceDetailsPage() {
       setPayments(pays);
       setStatusSnapshot(st);
     } catch (e: unknown) {
-      const fe = formatError(e);
-      setError(fe.message);
-      setErrorLines(fe.lines ?? null);
+      setError(formatError(e));
     } finally {
       setLoading(false);
     }
@@ -222,7 +218,6 @@ export default function InvoiceDetailsPage() {
     try {
       setIssuing(true);
       setError(null);
-      setErrorLines(null);
       setInfo(null);
 
       const result = await issueInvoice(invoice.id);
@@ -240,9 +235,7 @@ export default function InvoiceDetailsPage() {
         await pollPdfReady();
       }
     } catch (e: unknown) {
-      const fe = formatError(e);
-      setError(fe.message);
-      setErrorLines(fe.lines ?? null);
+      setError(formatError(e));
     } finally {
       setIssuing(false);
     }
@@ -254,7 +247,6 @@ export default function InvoiceDetailsPage() {
     try {
       setDownloading(true);
       setError(null);
-      setErrorLines(null);
       setInfo(null);
 
       const { blob, fileName } = await downloadInvoiceFile(invoice.id);
@@ -268,9 +260,7 @@ export default function InvoiceDetailsPage() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e: unknown) {
-      const fe = formatError(e);
-      setError(fe.message);
-      setErrorLines(fe.lines ?? null);
+      setError(formatError(e));
     } finally {
       setDownloading(false);
     }
@@ -281,15 +271,13 @@ export default function InvoiceDetailsPage() {
 
     const amt = Number(paymentAmount);
     if (!Number.isFinite(amt) || amt <= 0) {
-      setError("Payment amount must be greater than 0.");
-      setErrorLines(null);
+      setError({ message: "Payment amount must be greater than 0.", kind: "validation" });
       setInfo(null);
       return;
     }
 
     if (amt > balanceDue + 1e-9) {
-      setError("Payment amount cannot exceed Balance Due.");
-      setErrorLines(null);
+      setError({ message: "Payment amount cannot exceed Balance Due.", kind: "validation" });
       setInfo(null);
       return;
     }
@@ -311,7 +299,6 @@ export default function InvoiceDetailsPage() {
     try {
       setRecordingPayment(true);
       setError(null);
-      setErrorLines(null);
       setInfo(null);
 
       const result = await recordInvoicePayment(invoice.id, request);
@@ -324,9 +311,7 @@ export default function InvoiceDetailsPage() {
       setPaymentReference("");
       setPaymentNote("");
     } catch (e: unknown) {
-      const fe = formatError(e);
-      setError(fe.message);
-      setErrorLines(fe.lines ?? null);
+      setError(formatError(e));
     } finally {
       setRecordingPayment(false);
     }
@@ -359,16 +344,7 @@ export default function InvoiceDetailsPage() {
         </div>
       </div>
 
-      {error && (
-        <div style={{ marginTop: 12, padding: 10, border: "1px solid #f3b", background: "#fff5f8" }}>
-          <div>{error}</div>
-          {errorLines && errorLines.length > 0 && (
-            <ul style={{ margin: "8px 0 0 18px" }}>
-              {errorLines.map((l, i) => (<li key={i}>{l}</li>))}
-            </ul>
-          )}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
       {info && (
         <div style={{ marginTop: 12, padding: 10, border: "1px solid #bde", background: "#f2f8ff" }}>

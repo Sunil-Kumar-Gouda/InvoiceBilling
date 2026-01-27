@@ -6,7 +6,8 @@ import type { InvoiceDto } from "./types";
 
 import { getCustomers } from "../../api/customersApi";
 import { downloadInvoiceFile, getInvoices, issueInvoice } from "../../api/invoicesApi";
-import { formatError } from "../../api/errorFormat";
+import { formatError, type ErrorInfo } from "../../api/errorFormat";
+import ErrorBanner from "../../components/ErrorBanner";
 
 const STATUSES = ["Draft", "Issued", "Paid", "Overdue"] as const;
 
@@ -20,8 +21,7 @@ export default function InvoicesPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [invoices, setInvoices] = useState<InvoiceDto[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [errorLines, setErrorLines] = useState<string[] | null>(null);
+  const [error, setError] = useState<ErrorInfo | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
   // Filters + paging (minimum usable)
@@ -43,7 +43,6 @@ export default function InvoicesPage() {
     try {
       setLoading(true);
       setError(null);
-      setErrorLines(null);
       setInfo(null);
 
       const [c, inv] = await Promise.all([
@@ -60,8 +59,7 @@ export default function InvoicesPage() {
       setInvoices(inv);
     } catch (e: unknown) {
       const fe = formatError(e);
-      setError(fe.message);
-      setErrorLines(fe.lines ?? null);
+      setError(fe);
     } finally {
       setLoading(false);
     }
@@ -76,7 +74,6 @@ export default function InvoicesPage() {
     try {
       setIssuingId(id);
       setError(null);
-      setErrorLines(null);
       setInfo(null);
 
       const result = await issueInvoice(id);
@@ -89,8 +86,7 @@ export default function InvoicesPage() {
       await load();
     } catch (e: unknown) {
       const fe = formatError(e);
-      setError(fe.message);
-      setErrorLines(fe.lines ?? null);
+      setError(fe);
     } finally {
       setIssuingId(null);
     }
@@ -100,7 +96,6 @@ export default function InvoicesPage() {
     try {
       setDownloadingId(id);
       setError(null);
-      setErrorLines(null);
       setInfo(null);
 
       const { blob, fileName } = await downloadInvoiceFile(id);
@@ -115,8 +110,7 @@ export default function InvoicesPage() {
       URL.revokeObjectURL(url);
     } catch (e: unknown) {
       const fe = formatError(e);
-      setError(fe.message);
-      setErrorLines(fe.lines ?? null);
+      setError(fe);
     } finally {
       setDownloadingId(null);
     }
@@ -179,16 +173,7 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      {error && (
-        <div style={{ marginTop: 12, padding: 10, border: "1px solid #f3b", background: "#fff5f8" }}>
-          <div>{error}</div>
-          {errorLines && errorLines.length > 0 && (
-            <ul style={{ margin: "8px 0 0 18px" }}>
-              {errorLines.map((l, i) => (<li key={i}>{l}</li>))}
-            </ul>
-          )}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
       {info && (
         <div style={{ marginTop: 12, padding: 10, border: "1px solid #bde", background: "#f2f8ff" }}>

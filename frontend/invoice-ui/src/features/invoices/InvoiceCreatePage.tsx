@@ -9,7 +9,8 @@ import type { CreateInvoiceRequest } from "./types";
 import { getCustomers } from "../../api/customersApi";
 import { getProducts } from "../../api/productsApi";
 import { createInvoice } from "../../api/invoicesApi";
-import { ApiError } from "../../api/types";
+import { formatError, type ErrorInfo } from "../../api/errorFormat";
+import ErrorBanner from "../../components/ErrorBanner";
 
 type LineFormState = {
   productId: string;
@@ -59,7 +60,7 @@ export default function InvoiceCreatePage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorInfo | null>(null);
 
   const [form, setForm] = useState<InvoiceFormState>(() => createEmptyForm());
 
@@ -78,11 +79,7 @@ export default function InvoiceCreatePage() {
         setCustomers(c);
         setProducts(p);
       } catch (e: unknown) {
-        const msg =
-          e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
-          e instanceof Error ? e.message :
-          "Failed to load customers/products";
-        setError(msg);
+        setError(formatError(e));
       } finally {
         setLoading(false);
       }
@@ -129,11 +126,11 @@ export default function InvoiceCreatePage() {
 
   const validateAndBuildRequest = (): CreateInvoiceRequest | null => {
     if (!form.customerId) {
-      setError("Customer is required");
+      setError({ message: "Customer is required", kind: "validation" });
       return null;
     }
     if (!form.issueDate || !form.dueDate) {
-      setError("Issue date and Due date are required");
+      setError({ message: "Issue date and Due date are required", kind: "validation" });
       return null;
     }
 
@@ -168,7 +165,7 @@ export default function InvoiceCreatePage() {
       if (!built) return;
       req = built;
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Invalid form");
+      setError({ message: err instanceof Error ? err.message : "Invalid form", kind: "validation" });
       return;
     }
 
@@ -177,11 +174,7 @@ export default function InvoiceCreatePage() {
       const created = await createInvoice(req);
       navigate(`/invoices/${created.id}`);
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? (e.problemDetails?.detail ?? e.message) :
-        e instanceof Error ? e.message :
-        "Failed to create invoice";
-      setError(msg);
+      setError(formatError(e));
     } finally {
       setSaving(false);
     }
@@ -194,11 +187,7 @@ export default function InvoiceCreatePage() {
         <button type="button" onClick={() => navigate("/invoices")}>Back</button>
       </div>
 
-      {error && (
-        <div style={{ marginTop: 12, padding: 10, border: "1px solid #f3b", background: "#fff5f8" }}>
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
       {loading ? (
         <p style={{ marginTop: 12 }}>Loading...</p>

@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import type { FormEvent,ChangeEvent   } from "react";
-import { API_BASE_URL } from "../../config";
+import type { ChangeEvent, FormEvent } from "react";
+import { createCustomer, getCustomers } from "../../api/customersApi";
+import { formatError, type ErrorInfo } from "../../api/errorFormat";
+import ErrorBanner from "../../components/ErrorBanner";
 import type { Customer, CreateCustomerRequest } from "./types";
 
 function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorInfo | null>(null);
 
   const [form, setForm] = useState<CreateCustomerRequest>({
     name: "",
@@ -24,15 +26,11 @@ function CustomersPage() {
         setLoading(true);
         setError(null);
 
-        const response = await fetch(`${API_BASE_URL}/api/customers`);
-        if (!response.ok) {
-          throw new Error(`Failed to load customers (${response.status})`);
-        }
-
-        const data: Customer[] = await response.json();
+        const data = await getCustomers();
         setCustomers(data);
       } catch (err: any) {
-        setError(err.message ?? "Failed to load customers");
+        const fe = formatError(err);
+        setError(fe);
       } finally {
         setLoading(false);
       }
@@ -59,19 +57,7 @@ function CustomersPage() {
     try {
       setError(null);
 
-      const response = await fetch(`${API_BASE_URL}/api/customers`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form)
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Failed to create customer (${response.status})`);
-      }
-
-      const created: Customer = await response.json();
-
+      const created: Customer = await createCustomer(form);
       setCustomers(prev => [...prev, created]);
 
       setForm({
@@ -83,7 +69,8 @@ function CustomersPage() {
         taxId: ""
       });
     } catch (err: any) {
-      setError(err.message ?? "Failed to create customer");
+      const fe = formatError(err);
+      setError(fe);
     }
   };
 
@@ -92,11 +79,7 @@ function CustomersPage() {
       <h1>Customers</h1>
 
       {loading && <p>Loading customers...</p>}
-      {error && (
-        <p style={{ color: "red" }}>
-          Error: {error}
-        </p>
-      )}
+      {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
       <section style={{ marginBottom: "2rem" }}>
         <h2>Create Customer</h2>
