@@ -7,8 +7,6 @@ public sealed class InvoiceStatusDto
 {
     public Guid Id { get; set; }
     public string Status { get; set; } = default!;
-
-    // Day 13: Payments
     public decimal PaidTotal { get; set; }
     public decimal BalanceDue { get; set; }
 

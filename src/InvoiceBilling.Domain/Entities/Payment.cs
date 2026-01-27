@@ -3,7 +3,7 @@ using InvoiceBilling.Domain.Exceptions;
 namespace InvoiceBilling.Domain.Entities;
 
 /// <summary>
-/// Day 13: Payment recorded against an invoice.
+/// Payment recorded against an invoice.
 ///
 /// Stored as a separate table (Payments). Invoice keeps derived aggregates
 /// (PaidTotal/BalanceDue) for fast reads.

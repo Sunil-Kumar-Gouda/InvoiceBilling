@@ -1,10 +1,14 @@
 using InvoiceBilling.Application.Common.Persistence;
 using InvoiceBilling.Domain.Entities;
+using InvoiceBilling.Infrastructure.Auth;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace InvoiceBilling.Infrastructure.Persistence;
 
-public class InvoiceBillingDbContext : DbContext, IInvoiceBillingDbContext
+public class InvoiceBillingDbContext
+    : IdentityDbContext<ApplicationUser, IdentityRole<Guid>, Guid>, IInvoiceBillingDbContext
 {
     public InvoiceBillingDbContext(DbContextOptions<InvoiceBillingDbContext> options)
         : base(options)

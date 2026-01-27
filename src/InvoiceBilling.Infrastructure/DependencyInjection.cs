@@ -12,6 +12,8 @@ using Microsoft.Extensions.Options;
 using InvoiceBilling.Domain.Services;
 using Microsoft.Extensions.Hosting;
 using InvoiceBilling.Application.Common.Jobs;
+using InvoiceBilling.Infrastructure.Auth;
+using Microsoft.AspNetCore.Identity;
 
 namespace InvoiceBilling.Infrastructure;
 
@@ -35,7 +37,25 @@ public static class DependencyInjection
 
         services.AddDbContext<InvoiceBillingDbContext>(options =>
             options.UseSqlite(connectionString));
-        
+
+        // Identity (users) stored alongside the app database.
+        // JWT bearer authentication is configured in the API project.
+        services
+            .AddIdentityCore<ApplicationUser>(options =>
+            {
+                // Reasonable defaults for a demo/prototype; tighten for production.
+                options.User.RequireUniqueEmail = true;
+                options.Password.RequiredLength = 8;
+                options.Password.RequireDigit = true;
+                options.Password.RequireUppercase = false;
+                options.Password.RequireLowercase = false;
+                options.Password.RequireNonAlphanumeric = false;
+            })
+            .AddRoles<IdentityRole<Guid>>()
+            .AddEntityFrameworkStores<InvoiceBillingDbContext>()
+            .AddSignInManager<SignInManager<ApplicationUser>>();
+            //.AddSignInManager();
+
         // Expose a minimal abstraction for Application handlers.
         services.AddScoped<IInvoiceBillingDbContext>(sp =>
             sp.GetRequiredService<InvoiceBillingDbContext>());

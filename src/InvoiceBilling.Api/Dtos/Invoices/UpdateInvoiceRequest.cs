@@ -5,7 +5,6 @@ public sealed class UpdateInvoiceRequest
     public DateTime DueDate { get; set; }
     public string CurrencyCode { get; set; } = "INR";
 
-    // Day 6: allow changing tax rate for the whole invoice
     public decimal TaxRatePercent { get; set; } = 0m;
 
     public List<UpdateInvoiceLineRequest> Lines { get; set; } = new();

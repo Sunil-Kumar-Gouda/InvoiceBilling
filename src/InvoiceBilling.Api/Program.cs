@@ -1,7 +1,14 @@
+using System.Text;
 using FluentValidation;
+using InvoiceBilling.Api.Auth;
 using InvoiceBilling.Application.Invoices.IssueInvoice;
 using InvoiceBilling.Application.Invoices.UpdateDraftInvoice;
 using InvoiceBilling.Infrastructure;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+
 var builder = WebApplication.CreateBuilder(args);
 
 var allowedOrigins = builder.Configuration
@@ -19,20 +26,44 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Add services to the container.
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-// Add services to the container.
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
 
-// Add Infrastructure (DbContext, etc.)
+// Swagger (+ JWT Bearer)
+builder.Services.AddSwaggerGen(c =>
+{
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "InvoiceBilling API", Version = "v1" });
+
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "JWT Authorization header using the Bearer scheme. Example: 'Bearer {token}'"
+    });
+
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
+
+// Infrastructure (DbContext, AWS clients, PDF worker deps, Identity)
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment);
 
-// FluentValidation (CQRS commands)
+// FluentValidation (existing: IssueInvoiceCommand)
 builder.Services.AddScoped<IValidator<IssueInvoiceCommand>, IssueInvoiceCommandValidator>();
 
 // CQRS: register MediatR handlers from Application layer
@@ -40,50 +71,82 @@ builder.Services.AddMediatR(cfg =>
     cfg.RegisterServicesFromAssemblyContaining<UpdateDraftInvoiceCommand>());
 
 builder.Services.AddHealthChecks();
-//builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
+
 if (builder.Configuration.GetValue<bool>("BackgroundWorkers:InvoicePdfWorker:Enabled"))
 {
     builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
 }
 
-var app = builder.Build();
-app.UseCors("SpaCors");
-app.MapControllers();
-app.MapHealthChecks("/health");
+// Auth foundation (JWT)
+var authEnabled = builder.Configuration.GetValue<bool>("Auth:Enabled", true);
 
-// Configure the HTTP request pipeline.
+builder.Services.AddOptions<JwtOptions>()
+    .Bind(builder.Configuration.GetSection(JwtOptions.SectionName));
+
+builder.Services.AddScoped<JwtTokenService>();
+
+if (authEnabled)
+{
+    // Validate JWT config when enabled
+    builder.Services.AddOptions<JwtOptions>()
+        .Validate(o => !string.IsNullOrWhiteSpace(o.SigningKey) && o.SigningKey.Length >= 32,
+            "Jwt:SigningKey must be configured and at least 32 characters.")
+        .ValidateOnStart();
+
+    var jwt = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
+
+    builder.Services
+        .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            options.RequireHttpsMetadata = false;
+            options.SaveToken = true;
+
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidateLifetime = true,
+                ValidateIssuerSigningKey = true,
+                ValidIssuer = jwt.Issuer,
+                ValidAudience = jwt.Audience,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.SigningKey)),
+                ClockSkew = TimeSpan.FromSeconds(30)
+            };
+        });
+
+    builder.Services.AddAuthorization();
+}
+else
+{
+    // Keep tests frictionless (no auth); still allow [Authorize] in later days.
+    builder.Services.AddAuthorization(options =>
+        options.DefaultPolicy = new AuthorizationPolicyBuilder()
+            .RequireAssertion(_ => true)
+            .Build());
+}
+
+var app = builder.Build();
+
+app.UseCors("SpaCors");
+
+// Swagger
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-//app.UseHttpsRedirection();
-var summaries = new[]
+if (authEnabled)
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    app.UseAuthentication();
+}
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
+app.UseAuthorization();
+
+app.MapControllers();
+app.MapHealthChecks("/health");
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
 
 public partial class Program { }

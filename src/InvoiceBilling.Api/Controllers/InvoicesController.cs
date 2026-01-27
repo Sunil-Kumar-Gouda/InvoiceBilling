@@ -14,6 +14,7 @@ using InvoiceBilling.Domain.Services;
 using InvoiceBilling.Infrastructure.Cloud;
 using InvoiceBilling.Infrastructure.Persistence;
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -23,6 +24,7 @@ namespace InvoiceBilling.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class InvoicesController : ControllerBase
 {
     private readonly InvoiceBillingDbContext _db;
@@ -48,7 +50,7 @@ public class InvoicesController : ControllerBase
         _logger = logger;
     }
 
-    // Day 8 (Phase 2): List invoices with basic filters + paging
+    // List invoices with basic filters + paging
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<InvoiceDto>>> Get(
         [FromQuery] string? status,
@@ -258,7 +260,6 @@ public class InvoicesController : ControllerBase
         });
     }
 
-    // Day 13: Payments
     [HttpGet("{id:guid}/payments")]
     public async Task<ActionResult<IReadOnlyList<PaymentDto>>> GetPayments(Guid id, CancellationToken ct)
     {

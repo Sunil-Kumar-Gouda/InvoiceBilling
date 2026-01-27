@@ -14,7 +14,6 @@ public sealed class InvoiceDto
     public decimal TaxTotal { get; set; }
     public decimal GrandTotal { get; set; }
 
-    // Day 13: Payments
     public decimal PaidTotal { get; set; }
     public decimal BalanceDue { get; set; }
 

@@ -4,7 +4,7 @@ using MediatR;
 namespace InvoiceBilling.Application.Invoices.RecordPayment;
 
 /// <summary>
-/// Day 13: Record a payment against an issued invoice.
+/// Record a payment against an issued invoice.
 /// </summary>
 public sealed record RecordPaymentCommand(
     Guid InvoiceId,

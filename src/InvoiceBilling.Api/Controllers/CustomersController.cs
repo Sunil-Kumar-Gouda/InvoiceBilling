@@ -1,6 +1,7 @@
 using InvoiceBilling.Api.Dtos.Customers;
 using InvoiceBilling.Domain.Entities;
 using InvoiceBilling.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +9,7 @@ namespace InvoiceBilling.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class CustomersController : ControllerBase
 {
     private readonly InvoiceBillingDbContext _db;
