@@ -28,6 +28,7 @@ function CustomersPage() {
 
         const data = await getCustomers();
         setCustomers(data);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         const fe = formatError(err);
         setError(fe);
@@ -68,6 +69,7 @@ function CustomersPage() {
         billingAddress: "",
         taxId: ""
       });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       const fe = formatError(err);
       setError(fe);

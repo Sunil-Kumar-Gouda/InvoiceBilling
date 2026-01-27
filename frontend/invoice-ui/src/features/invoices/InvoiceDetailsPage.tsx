@@ -134,7 +134,7 @@ export default function InvoiceDetailsPage() {
     if (!invoice) return 0;
     if (invoice.status === "Paid") return 0;
     return Math.max(0, invoice.grandTotal - paidTotal);
-  }, [invoice, invoice?.balanceDue, invoice?.grandTotal, invoice?.status, paidTotal, statusSnapshot?.balanceDue]);
+  }, [invoice, paidTotal, statusSnapshot?.balanceDue]);
 
   const paymentsSorted = useMemo(() => {
     return [...payments].sort((a, b) => (b.paidAt ?? '').localeCompare(a.paidAt ?? ''));

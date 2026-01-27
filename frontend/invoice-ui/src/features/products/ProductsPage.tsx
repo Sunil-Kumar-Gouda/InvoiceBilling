@@ -59,8 +59,7 @@ export default function ProductsPage() {
 
   useEffect(() => {
     console.log("ProductsPage mounted -> loading products");
-    void loadProducts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadProducts(); 
   }, []);
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {

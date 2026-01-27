@@ -44,8 +44,8 @@ public sealed class TestWebApplicationFactory : WebApplicationFactory<Program>
 
             foreach (var d in workerDescriptors)
                 services.Remove(d);
-            
-            
+
+
             services.RemoveAll<IInvoicePdfJobEnqueuer>();
             services.AddSingleton<IInvoicePdfJobEnqueuer, NoOpInvoicePdfJobEnqueuer>();
 

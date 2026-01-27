@@ -54,12 +54,12 @@ public static class DependencyInjection
             .AddRoles<IdentityRole<Guid>>()
             .AddEntityFrameworkStores<InvoiceBillingDbContext>()
             .AddSignInManager<SignInManager<ApplicationUser>>();
-            //.AddSignInManager();
+        //.AddSignInManager();
 
         // Expose a minimal abstraction for Application handlers.
         services.AddScoped<IInvoiceBillingDbContext>(sp =>
             sp.GetRequiredService<InvoiceBillingDbContext>());
-            
+
         // Bind AwsOptions from configuration
         services.Configure<AwsOptions>(configuration.GetSection("Aws"));
 

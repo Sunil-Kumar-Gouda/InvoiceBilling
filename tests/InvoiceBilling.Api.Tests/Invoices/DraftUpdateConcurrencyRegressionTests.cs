@@ -19,90 +19,90 @@ public class DraftUpdateConcurrencyRegressionTests : IClassFixture<TestWebApplic
         _factory = factory;
     }
 
-/*
-    [Fact]
-    public async Task Put_draft_invoice_can_be_called_repeatedly_without_500_and_lines_match_latest_payload()
-    {
-        await ResetDatabaseAsync();
-
-        var client = _factory.CreateClient();
-        var (customerId, productIds) = await SeedCustomerAndProductsAsync(client, productCount: 3);
-
-        var invoice = await CreateDraftInvoiceAsync(client, customerId, new[]
+    /*
+        [Fact]
+        public async Task Put_draft_invoice_can_be_called_repeatedly_without_500_and_lines_match_latest_payload()
         {
-            (productIds[0], "Line 1", 100m, 1m),
-            (productIds[1], "Line 2",  50m, 2m),
-        });
+            await ResetDatabaseAsync();
 
-        for (var i = 0; i < 10; i++)
-        {
-            var lines = (i % 2 == 0)
-                ? new List<UpdateInvoiceLineRequest>
+            var client = _factory.CreateClient();
+            var (customerId, productIds) = await SeedCustomerAndProductsAsync(client, productCount: 3);
+
+            var invoice = await CreateDraftInvoiceAsync(client, customerId, new[]
+            {
+                (productIds[0], "Line 1", 100m, 1m),
+                (productIds[1], "Line 2",  50m, 2m),
+            });
+
+            for (var i = 0; i < 10; i++)
+            {
+                var lines = (i % 2 == 0)
+                    ? new List<UpdateInvoiceLineRequest>
+                    {
+                        new() { ProductId = productIds[0], Description = $"A{i}", UnitPrice = 100m + i, Quantity = 1m + i },
+                        new() { ProductId = productIds[1], Description = $"B{i}", UnitPrice =  50m,     Quantity = 2m },
+                    }
+                    : new List<UpdateInvoiceLineRequest>
+                    {
+                        new() { ProductId = productIds[0], Description = $"A{i}", UnitPrice = 100m, Quantity = 1m },
+                        new() { ProductId = productIds[1], Description = $"B{i}", UnitPrice =  55m, Quantity = 2m },
+                        new() { ProductId = productIds[2], Description = $"C{i}", UnitPrice =  10m, Quantity = 3m },
+                    };
+
+                var req = new UpdateInvoiceRequest
                 {
-                    new() { ProductId = productIds[0], Description = $"A{i}", UnitPrice = 100m + i, Quantity = 1m + i },
-                    new() { ProductId = productIds[1], Description = $"B{i}", UnitPrice =  50m,     Quantity = 2m },
-                }
-                : new List<UpdateInvoiceLineRequest>
-                {
-                    new() { ProductId = productIds[0], Description = $"A{i}", UnitPrice = 100m, Quantity = 1m },
-                    new() { ProductId = productIds[1], Description = $"B{i}", UnitPrice =  55m, Quantity = 2m },
-                    new() { ProductId = productIds[2], Description = $"C{i}", UnitPrice =  10m, Quantity = 3m },
+                    DueDate = DateTime.UtcNow.Date.AddDays(14),
+                    CurrencyCode = "INR",
+                    TaxRatePercent = 5m,
+                    Lines = lines
                 };
 
-            var req = new UpdateInvoiceRequest
+                var put = await client.PutAsJsonAsync($"/api/invoices/{invoice.Id}", req);
+
+                // Fix edit draft issue
+                //Assert.NotEqual(HttpStatusCode.InternalServerError, put.StatusCode);
+                //Assert.True(put.IsSuccessStatusCode, await put.Content.ReadAsStringAsync());
+
+                // await AssertInvoiceLinesInDbAsync(invoice.Id, expectedCount: lines.Count);
+                // await AssertInvoiceTotalsInDbAsync(invoice.Id, req.TaxRatePercent, lines);
+            }
+        }
+
+        [Fact]
+        public async Task Put_draft_invoice_can_remove_lines_and_db_has_no_orphans()
+        {
+            await ResetDatabaseAsync();
+
+            var client = _factory.CreateClient();
+            var (customerId, productIds) = await SeedCustomerAndProductsAsync(client, productCount: 3);
+
+            var invoice = await CreateDraftInvoiceAsync(client, customerId, new[]
             {
-                DueDate = DateTime.UtcNow.Date.AddDays(14),
+                (productIds[0], "L1", 10m, 1m),
+                (productIds[1], "L2", 20m, 1m),
+                (productIds[2], "L3", 30m, 1m),
+            });
+
+            var update = new UpdateInvoiceRequest
+            {
+                DueDate = DateTime.UtcNow.Date.AddDays(10),
                 CurrencyCode = "INR",
-                TaxRatePercent = 5m,
-                Lines = lines
+                TaxRatePercent = 0m,
+                Lines = new List<UpdateInvoiceLineRequest>
+                {
+                    new() { ProductId = productIds[1], Description = "Only remaining", UnitPrice = 99m, Quantity = 2m }
+                }
             };
 
-            var put = await client.PutAsJsonAsync($"/api/invoices/{invoice.Id}", req);
+            var resp = await client.PutAsJsonAsync($"/api/invoices/{invoice.Id}", update);
+            // Fix edit draf issue
+            // Assert.True(resp.IsSuccessStatusCode, await resp.Content.ReadAsStringAsync());
 
-            // Fix edit draft issue
-            //Assert.NotEqual(HttpStatusCode.InternalServerError, put.StatusCode);
-            //Assert.True(put.IsSuccessStatusCode, await put.Content.ReadAsStringAsync());
-
-            // await AssertInvoiceLinesInDbAsync(invoice.Id, expectedCount: lines.Count);
-            // await AssertInvoiceTotalsInDbAsync(invoice.Id, req.TaxRatePercent, lines);
+            //await AssertInvoiceLinesInDbAsync(invoice.Id, expectedCount: 1);
+            //await AssertInvoiceTotalsInDbAsync(invoice.Id, update.TaxRatePercent, update.Lines);
         }
-    }
+        */
 
-    [Fact]
-    public async Task Put_draft_invoice_can_remove_lines_and_db_has_no_orphans()
-    {
-        await ResetDatabaseAsync();
-
-        var client = _factory.CreateClient();
-        var (customerId, productIds) = await SeedCustomerAndProductsAsync(client, productCount: 3);
-
-        var invoice = await CreateDraftInvoiceAsync(client, customerId, new[]
-        {
-            (productIds[0], "L1", 10m, 1m),
-            (productIds[1], "L2", 20m, 1m),
-            (productIds[2], "L3", 30m, 1m),
-        });
-
-        var update = new UpdateInvoiceRequest
-        {
-            DueDate = DateTime.UtcNow.Date.AddDays(10),
-            CurrencyCode = "INR",
-            TaxRatePercent = 0m,
-            Lines = new List<UpdateInvoiceLineRequest>
-            {
-                new() { ProductId = productIds[1], Description = "Only remaining", UnitPrice = 99m, Quantity = 2m }
-            }
-        };
-
-        var resp = await client.PutAsJsonAsync($"/api/invoices/{invoice.Id}", update);
-        // Fix edit draf issue
-        // Assert.True(resp.IsSuccessStatusCode, await resp.Content.ReadAsStringAsync());
-
-        //await AssertInvoiceLinesInDbAsync(invoice.Id, expectedCount: 1);
-        //await AssertInvoiceTotalsInDbAsync(invoice.Id, update.TaxRatePercent, update.Lines);
-    }
-    */
-    
     [Fact]
     public async Task Put_non_draft_invoice_returns_409_conflict()
     {
