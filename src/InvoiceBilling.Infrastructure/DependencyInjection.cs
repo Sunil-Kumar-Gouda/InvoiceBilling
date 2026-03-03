@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Amazon;
+using InvoiceBilling.Infrastructure.PdfTemplates;
 using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.SQS;
@@ -59,6 +60,13 @@ public static class DependencyInjection
         // Expose a minimal abstraction for Application handlers.
         services.AddScoped<IInvoiceBillingDbContext>(sp =>
             sp.GetRequiredService<InvoiceBillingDbContext>());
+
+        // PDF template storage (file-based) + renderer.
+        // This is intentionally infrastructure-only so you can swap to DB storage later.
+        services.Configure<PdfTemplatesOptions>(configuration.GetSection(PdfTemplatesOptions.SectionName));
+        services.AddSingleton<IPdfTemplateStore, FilePdfTemplateStore>();
+        services.AddSingleton<InvoiceValueResolver>();
+        services.AddScoped<IInvoicePdfTemplateRenderer, InvoicePdfTemplateRenderer>();
 
         // Bind AwsOptions from configuration
         services.Configure<AwsOptions>(configuration.GetSection("Aws"));
