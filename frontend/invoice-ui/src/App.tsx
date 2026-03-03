@@ -25,6 +25,9 @@ function App() {
           <li>
             <Link to="/invoices">Invoices</Link>
           </li>
+          <li>
+            <Link to="/pdf-template">PDF Template</Link>
+          </li>
 
           {isAuthenticated && (
             <li>
