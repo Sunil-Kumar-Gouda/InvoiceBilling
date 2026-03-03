@@ -881,7 +881,8 @@
           "Microsoft.EntityFrameworkCore.Sqlite": "[8.0.22, )",
           "Microsoft.Extensions.Configuration.Binder": "[8.0.2, )",
           "Microsoft.Extensions.Hosting.Abstractions": "[8.0.0, )",
-          "Microsoft.Extensions.Options.ConfigurationExtensions": "[8.0.0, )"
+          "Microsoft.Extensions.Options.ConfigurationExtensions": "[8.0.0, )",
+          "PDFsharp": "[6.2.4, )"
         }
       },
       "AWSSDK.S3": {
