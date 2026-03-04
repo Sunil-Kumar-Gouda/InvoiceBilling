@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using InvoiceBilling.Domain.Services;
 using Microsoft.Extensions.Hosting;
 using InvoiceBilling.Application.Common.Jobs;
+using InvoiceBilling.Application.Common.PdfTemplates;
 using InvoiceBilling.Infrastructure.Auth;
 using Microsoft.AspNetCore.Identity;
 
@@ -65,8 +66,10 @@ public static class DependencyInjection
         // This is intentionally infrastructure-only so you can swap to DB storage later.
         services.Configure<PdfTemplatesOptions>(configuration.GetSection(PdfTemplatesOptions.SectionName));
         services.AddSingleton<IPdfTemplateStore, FilePdfTemplateStore>();
+        services.AddSingleton<IActivePdfTemplateStore>(sp => (IActivePdfTemplateStore)sp.GetRequiredService<IPdfTemplateStore>());
         services.AddSingleton<InvoiceValueResolver>();
         services.AddScoped<IInvoicePdfTemplateRenderer, InvoicePdfTemplateRenderer>();
+        services.AddScoped<IInvoicePdfPreviewRenderer, InvoicePdfPreviewRenderer>();
 
         // Bind AwsOptions from configuration
         services.Configure<AwsOptions>(configuration.GetSection("Aws"));

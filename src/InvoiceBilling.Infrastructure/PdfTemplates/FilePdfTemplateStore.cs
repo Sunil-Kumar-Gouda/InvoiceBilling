@@ -1,8 +1,16 @@
+using InvoiceBilling.Application.Common.PdfTemplates;
 using Microsoft.Extensions.Options;
 
 namespace InvoiceBilling.Infrastructure.PdfTemplates;
 
-public sealed class FilePdfTemplateStore : IPdfTemplateStore
+/// <summary>
+/// File-based implementation of both <see cref="IPdfTemplateStore"/> and
+/// <see cref="IActivePdfTemplateStore"/>. A single concrete class satisfies
+/// the Infrastructure-facing interface (IPdfTemplateStore) and the
+/// Application-facing interface (IActivePdfTemplateStore) so the store logic
+/// stays in one place.
+/// </summary>
+public sealed class FilePdfTemplateStore : IPdfTemplateStore, IActivePdfTemplateStore
 {
     private readonly PdfTemplatesOptions _options;
     private readonly string _contentRoot;
@@ -45,4 +53,3 @@ public sealed class FilePdfTemplateStore : IPdfTemplateStore
             : Path.Combine(_contentRoot, p.Replace('/', Path.DirectorySeparatorChar));
     }
 }
-

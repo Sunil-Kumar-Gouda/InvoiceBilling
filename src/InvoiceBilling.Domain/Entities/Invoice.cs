@@ -12,6 +12,7 @@ public sealed class Invoice
     public string InvoiceNumber { get; private set; } = string.Empty;
 
     public Guid CustomerId { get; private set; }
+    public Customer? Customer { get; private set; }
     public string Status { get; private set; } = InvoiceStatus.Draft;
 
     public DateTime IssueDate { get; private set; }

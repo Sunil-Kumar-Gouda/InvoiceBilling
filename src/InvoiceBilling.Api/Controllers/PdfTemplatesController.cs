@@ -1,8 +1,9 @@
-using InvoiceBilling.Infrastructure.Persistence;
-using InvoiceBilling.Infrastructure.PdfTemplates;
-using Microsoft.AspNetCore.Authorization;
+using InvoiceBilling.Application.PdfTemplates.DeleteActivePdfTemplate;
+using InvoiceBilling.Application.PdfTemplates.GetActivePdfTemplate;
+using InvoiceBilling.Application.PdfTemplates.PreviewInvoicePdf;
+using InvoiceBilling.Application.PdfTemplates.SaveActivePdfTemplate;
+using MediatR;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
 namespace InvoiceBilling.Api.Controllers;
@@ -13,15 +14,11 @@ namespace InvoiceBilling.Api.Controllers;
 //[Authorize(Roles = "Admin")]
 public sealed class PdfTemplatesController : ControllerBase
 {
-    private readonly IPdfTemplateStore _store;
-    private readonly InvoiceBillingDbContext _db;
-    private readonly IInvoicePdfTemplateRenderer _renderer;
+    private readonly IMediator _mediator;
 
-    public PdfTemplatesController(IPdfTemplateStore store, InvoiceBillingDbContext db, IInvoicePdfTemplateRenderer renderer)
+    public PdfTemplatesController(IMediator mediator)
     {
-        _store = store;
-        _db = db;
-        _renderer = renderer;
+        _mediator = mediator;
     }
 
     /// <summary>
@@ -30,9 +27,17 @@ public sealed class PdfTemplatesController : ControllerBase
     [HttpGet("active")]
     public async Task<IActionResult> GetActive(CancellationToken ct)
     {
-        var raw = await _store.GetActiveTemplateJsonAsync(ct);
-        if (raw is null) return NotFound();
-        return Content(raw, "application/json");
+        var result = await _mediator.Send(new GetActivePdfTemplateQuery(), ct);
+
+        if (!result.Succeeded)
+        {
+            return Problem(
+                title: result.ErrorTitle ?? "Request failed",
+                detail: result.ErrorDetail ?? "The request could not be completed.",
+                statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
+        }
+
+        return Content(result.TemplateJson!, "application/json");
     }
 
     /// <summary>
@@ -41,7 +46,18 @@ public sealed class PdfTemplatesController : ControllerBase
     [HttpPut("active")]
     public async Task<IActionResult> PutActive([FromBody] JsonElement template, CancellationToken ct)
     {
-        await _store.SaveActiveTemplateJsonAsync(template.GetRawText(), ct);
+        var result = await _mediator.Send(
+            new SaveActivePdfTemplateCommand(TemplateJson: template.GetRawText()),
+            ct);
+
+        if (!result.Succeeded)
+        {
+            return Problem(
+                title: result.ErrorTitle ?? "Request failed",
+                detail: result.ErrorDetail ?? "The request could not be completed.",
+                statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
+        }
+
         return NoContent();
     }
 
@@ -51,7 +67,16 @@ public sealed class PdfTemplatesController : ControllerBase
     [HttpDelete("active")]
     public async Task<IActionResult> DeleteActive(CancellationToken ct)
     {
-        await _store.DeleteActiveTemplateAsync(ct);
+        var result = await _mediator.Send(new DeleteActivePdfTemplateCommand(), ct);
+
+        if (!result.Succeeded)
+        {
+            return Problem(
+                title: result.ErrorTitle ?? "Request failed",
+                detail: result.ErrorDetail ?? "The request could not be completed.",
+                statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
+        }
+
         return NoContent();
     }
 
@@ -63,70 +88,20 @@ public sealed class PdfTemplatesController : ControllerBase
     [Produces("application/pdf")]
     public async Task<IActionResult> Preview(Guid invoiceId, [FromBody] JsonElement template, CancellationToken ct)
     {
-        // Load invoice without relying on compile-time nav property names.
-        var invoice = await FindInvoiceAsync(invoiceId, ct);
+        var result = await _mediator.Send(
+            new PreviewInvoicePdfQuery(
+                InvoiceId: invoiceId,
+                TemplateJson: template.GetRawText()),
+            ct);
 
-        if (invoice is null) return NotFound();
-
-        await TryLoadReferenceAsync(invoice, "CustomerId", ct);
-        await TryLoadCollectionAsync(invoice, "Lines", ct);
-        await TryLoadCollectionAsync(invoice, "InvoiceLines", ct);
-        await TryLoadCollectionAsync(invoice, "Items", ct);
-
-        var def = InvoicePdfTemplateRenderer.ParseTemplate(template);
-        var pdf = _renderer.Render(invoice, def);
-        return File(pdf, "application/pdf", $"invoice-{invoiceId}-preview.pdf");
-    }
-
-    private async Task<object?> FindInvoiceAsync(Guid invoiceId, CancellationToken ct)
-    {
-        var invoiceClrType = _db.Model.GetEntityTypes()
-            .Select(e => e.ClrType)
-            .FirstOrDefault(t => string.Equals(t.Name, "Invoice", StringComparison.Ordinal));
-
-        if (invoiceClrType is null)
+        if (!result.Succeeded)
         {
-            return null;
+            return Problem(
+                title: result.ErrorTitle ?? "Request failed",
+                detail: result.ErrorDetail ?? "The request could not be completed.",
+                statusCode: result.ErrorStatusCode ?? StatusCodes.Status400BadRequest);
         }
 
-        try
-        {
-            return await _db.FindAsync(invoiceClrType, new object?[] { invoiceId }, ct);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private async Task TryLoadReferenceAsync(object entity, string referenceName, CancellationToken ct)
-    {
-        try
-        {
-            var entry = _db.Entry(entity);
-            var reference = entry.Reference(referenceName);
-            if (!reference.IsLoaded)
-                await reference.LoadAsync(ct);
-        }
-        catch(Exception ex)
-        {
-            // Ignore if nav doesn't exist
-        }
-    }
-
-    private async Task TryLoadCollectionAsync(object entity, string collectionName, CancellationToken ct)
-    {
-        try
-        {
-            var entry = _db.Entry(entity);
-            var collection = entry.Collection(collectionName);
-            if (!collection.IsLoaded)
-                await collection.LoadAsync(ct);
-        }
-        catch(Exception ex)
-        {
-            // Ignore if nav doesn't exist
-        }
+        return File(result.PdfBytes!, "application/pdf", $"invoice-{invoiceId}-preview.pdf");
     }
 }
-

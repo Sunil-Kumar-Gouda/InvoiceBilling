@@ -40,7 +40,7 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         });
 
         // Relationships
-        builder.HasOne<Customer>()
+        builder.HasOne(x => x.Customer)
                .WithMany()
                .HasForeignKey(x => x.CustomerId)
                // Invoicing data should not be cascade-deleted
