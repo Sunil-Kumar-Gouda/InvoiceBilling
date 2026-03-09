@@ -14,7 +14,9 @@ using InvoiceBilling.Domain.Services;
 using Microsoft.Extensions.Hosting;
 using InvoiceBilling.Application.Common.Jobs;
 using InvoiceBilling.Application.Common.PdfTemplates;
+using InvoiceBilling.Application.Common.Storage;
 using InvoiceBilling.Infrastructure.Auth;
+using InvoiceBilling.Infrastructure.Storage;
 using Microsoft.AspNetCore.Identity;
 
 namespace InvoiceBilling.Infrastructure;
@@ -112,6 +114,7 @@ public static class DependencyInjection
 
         services.AddSingleton<IInvoiceTotalsCalculator, InvoiceTotalsCalculator>();
         services.AddSingleton<IInvoicePdfJobEnqueuer, SqsInvoicePdfJobEnqueuer>();
+        services.AddSingleton<IInvoicePdfStorage, S3InvoicePdfStorage>();
 
         return services;
     }
