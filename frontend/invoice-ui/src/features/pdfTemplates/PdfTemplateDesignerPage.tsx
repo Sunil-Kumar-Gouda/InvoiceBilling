@@ -123,8 +123,8 @@ export default function PdfTemplateDesignerPage() {
     if (!canvas) return { x: 0, y: 0 };
 
     const r = canvas.getBoundingClientRect();
-    const xPx = (e as any).clientX - r.left;
-    const yPx = (e as any).clientY - r.top;
+    const xPx = e.clientX - r.left;
+    const yPx = e.clientY - r.top;
     return { x: xPx / scale, y: yPx / scale };
   }
 
@@ -222,11 +222,11 @@ export default function PdfTemplateDesignerPage() {
       }
       setTemplate(parsed);
       alert("Applied JSON.");
-    } catch (e: any) {
+    } catch (e: unknown) {
       setError({
         kind: "validation",
         title: "Invalid JSON",
-        message: e?.message ?? "Invalid JSON",
+        message: e instanceof Error ? e.message : "Invalid JSON",
         status: 400,
         lines: [],
       });
