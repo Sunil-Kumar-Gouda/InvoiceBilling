@@ -3,18 +3,14 @@ using System.Text.Json.Serialization;
 namespace InvoiceBilling.Infrastructure.PdfTemplates;
 
 /// <summary>
-/// JSON schema for your template designer UI.
-/// Keep this stable: the UI can save/load it, and the worker can render from it.
+/// JSON schema for the template designer UI.
+/// All coordinates are in points (pt). A4 page = 595 × 842 pt.
 /// </summary>
 public sealed class PdfTemplateDefinition
 {
     [JsonPropertyName("page")]
     public PdfPageSpec Page { get; set; } = new();
 
-    /// <summary>
-    /// Free-positioned text fields.
-    /// Keys map to invoice values (see <see cref="InvoiceValueResolver"/>).
-    /// </summary>
     [JsonPropertyName("fields")]
     public List<PdfTemplateField> Fields { get; set; } = new();
 
@@ -24,47 +20,56 @@ public sealed class PdfTemplateDefinition
 
 public sealed class PdfPageSpec
 {
-    /// <summary>Page width in mm (default A4: 210mm).</summary>
-    [JsonPropertyName("widthMm")]
-    public double WidthMm { get; set; } = 210;
+    /// <summary>Page width in points (A4 default: 595).</summary>
+    [JsonPropertyName("width")]
+    public double Width { get; set; } = 595;
 
-    /// <summary>Page height in mm (default A4: 297mm).</summary>
-    [JsonPropertyName("heightMm")]
-    public double HeightMm { get; set; } = 297;
+    /// <summary>Page height in points (A4 default: 842).</summary>
+    [JsonPropertyName("height")]
+    public double Height { get; set; } = 842;
 
-    [JsonPropertyName("marginMm")]
-    public double MarginMm { get; set; } = 10;
+    [JsonPropertyName("margin")]
+    public double Margin { get; set; } = 40;
 }
 
 public sealed class PdfTemplateField
 {
     /// <summary>
-    /// Value key. Example: invoiceNumber, issueDate, dueDate, customerName, total, balanceDue.
-    /// You can also use literal text by prefixing with "text:" (e.g. "text:TAX INVOICE").
+    /// Value key. Examples: invoiceNumber, issueDate, dueDate, customerName,
+    /// subtotal, taxTotal, total, paidTotal, balanceDue, status.
+    /// Use "text:" prefix for literals e.g. "text:INVOICE".
     /// </summary>
     [JsonPropertyName("key")]
     public string Key { get; set; } = string.Empty;
 
-    /// <summary>Position X in millimeters.</summary>
-    [JsonPropertyName("xMm")]
-    public double Xmm { get; set; }
+    [JsonPropertyName("x")]
+    public double X { get; set; }
 
-    /// <summary>Position Y in millimeters.</summary>
-    [JsonPropertyName("yMm")]
-    public double Ymm { get; set; }
+    [JsonPropertyName("y")]
+    public double Y { get; set; }
+
+    [JsonPropertyName("w")]
+    public double W { get; set; }
+
+    [JsonPropertyName("h")]
+    public double H { get; set; }
 
     [JsonPropertyName("font")]
     public PdfFontSpec Font { get; set; } = new();
 
-    /// <summary>Optional color in hex (e.g. #111111). If empty, defaults to black.</summary>
+    /// <summary>Hex color e.g. #333333. Defaults to black.</summary>
     [JsonPropertyName("color")]
     public string? Color { get; set; }
+
+    /// <summary>Text alignment: Left, Center, Right. Defaults to Left.</summary>
+    [JsonPropertyName("align")]
+    public string? Align { get; set; }
 }
 
 public sealed class PdfFontSpec
 {
     [JsonPropertyName("family")]
-    public string Family { get; set; } = "Segoe UI";
+    public string Family { get; set; } = "Arial";
 
     [JsonPropertyName("size")]
     public double Size { get; set; } = 10;
@@ -78,41 +83,50 @@ public sealed class PdfFontSpec
 
 public sealed class PdfLinesTableSpec
 {
-    [JsonPropertyName("xMm")]
-    public double Xmm { get; set; } = 10;
+    [JsonPropertyName("x")]
+    public double X { get; set; } = 40;
 
-    [JsonPropertyName("yMm")]
-    public double Ymm { get; set; } = 70;
+    [JsonPropertyName("y")]
+    public double Y { get; set; } = 200;
 
-    [JsonPropertyName("rowHeightMm")]
-    public double RowHeightMm { get; set; } = 6;
+    [JsonPropertyName("w")]
+    public double W { get; set; } = 515;
 
-    [JsonPropertyName("header")]
-    public PdfTableHeaderSpec Header { get; set; } = new();
+    [JsonPropertyName("h")]
+    public double H { get; set; } = 400;
+
+    /// <summary>Height of each row in points.</summary>
+    [JsonPropertyName("rowHeight")]
+    public double RowHeight { get; set; } = 16;
+
+    [JsonPropertyName("headerFont")]
+    public PdfFontSpec HeaderFont { get; set; } = new() { Bold = true };
+
+    [JsonPropertyName("rowFont")]
+    public PdfFontSpec RowFont { get; set; } = new();
 
     [JsonPropertyName("columns")]
     public List<PdfTableColumnSpec> Columns { get; set; } = new();
 }
 
-public sealed class PdfTableHeaderSpec
-{
-    [JsonPropertyName("enabled")]
-    public bool Enabled { get; set; } = true;
-
-    [JsonPropertyName("font")]
-    public PdfFontSpec Font { get; set; } = new() { Bold = true };
-}
-
 public sealed class PdfTableColumnSpec
 {
-    /// <summary>Example: line.description, line.quantity, line.unitPrice, line.total.</summary>
+    /// <summary>
+    /// Data key. Built-in short keys: Description, Qty, Rate, Amount.
+    /// Also accepts: line.description, line.quantity, line.unitPrice, line.total.
+    /// </summary>
     [JsonPropertyName("key")]
     public string Key { get; set; } = string.Empty;
 
+    /// <summary>Column header label. Falls back to Key if not set.</summary>
     [JsonPropertyName("header")]
-    public string Header { get; set; } = string.Empty;
+    public string? Header { get; set; }
 
-    [JsonPropertyName("widthMm")]
-    public double WidthMm { get; set; }
+    /// <summary>Column width in points.</summary>
+    [JsonPropertyName("w")]
+    public double W { get; set; }
+
+    /// <summary>Text alignment: Left, Center, Right.</summary>
+    [JsonPropertyName("align")]
+    public string? Align { get; set; }
 }
-

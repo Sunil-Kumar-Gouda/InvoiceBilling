@@ -2,10 +2,11 @@ using Amazon.S3;
 using Amazon.S3.Model;
 using Amazon.SQS;
 using Amazon.SQS.Model;
+using InvoiceBilling.Application.Common.PdfTemplates;
 using InvoiceBilling.Domain.Exceptions;
 using InvoiceBilling.Infrastructure.Cloud;
 using InvoiceBilling.Infrastructure.Persistence;
-using InvoiceBilling.Api.Pdf;
+using InvoiceBilling.Infrastructure.PdfTemplates;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Net;
@@ -341,6 +342,7 @@ public sealed class InvoicePdfWorker : BackgroundService
 
             var invoice = await db.Invoices
                 .Include(i => i.Lines)
+                .Include(i => i.Customer)
                 .FirstOrDefaultAsync(i => i.Id == invoiceId, ct);
             if (invoice is null)
             {
@@ -363,11 +365,22 @@ public sealed class InvoicePdfWorker : BackgroundService
             var bucket = _aws.S3?.BucketName;
             if (string.IsNullOrWhiteSpace(bucket))
                 throw new InvalidOperationException("Aws:S3:BucketName is missing.");
-            var customer = await db.Customers
-                .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.Id == invoice.CustomerId, ct);
 
-            var pdfBytes = InvoicePdfRenderer.Render(invoice, customer);
+            var templateStore = scope.ServiceProvider.GetRequiredService<IActivePdfTemplateStore>();
+            var templateRenderer = scope.ServiceProvider.GetRequiredService<IInvoicePdfTemplateRenderer>();
+
+            var templateJson = await templateStore.GetActiveTemplateJsonAsync(ct);
+            if (string.IsNullOrWhiteSpace(templateJson))
+            {
+                var defaultTemplatePath = Path.Combine(
+                    AppContext.BaseDirectory, "App_Data", "pdf-template.default.json");
+                templateJson = await File.ReadAllTextAsync(defaultTemplatePath, ct);
+            }
+
+            var templateDef = InvoicePdfTemplateRenderer.ParseTemplate(
+                JsonDocument.Parse(templateJson).RootElement);
+
+            var pdfBytes = templateRenderer.Render(invoice, templateDef);
 
             var key = $"invoices/{invoiceId}.pdf";
 
