@@ -33,7 +33,24 @@ export type FieldPlacement = {
   h: number;           // points
   align: Align;
   font: FontSpec;
+  color?: string;      // hex color for text, e.g. "#1a1a1a". Defaults to black if omitted.
 };
+
+// ─── Line elements ────────────────────────────────────────────────────────────
+
+export type LineOrientation = "H" | "V"; // Horizontal | Vertical
+
+export type LineElement = {
+  id: string;
+  orientation: LineOrientation;
+  x: number;           // start x, PDF points
+  y: number;           // start y, PDF points
+  length: number;      // total line length, PDF points
+  thickness: number;   // stroke width, PDF points (1 = hairline, 2 = normal, etc.)
+  color: string;       // hex, e.g. "#000000"
+};
+
+// ─── Lines table ──────────────────────────────────────────────────────────────
 
 export type LinesTableColumnKey = "Description" | "Qty" | "Rate" | "Amount";
 
@@ -47,31 +64,36 @@ export type LinesTable = {
   columns: Array<{ key: LinesTableColumnKey; w: number; align: Align }>;
 };
 
+// ─── Template root ────────────────────────────────────────────────────────────
+
 export type PdfTemplateDefinition = {
   version: number;
   page: { size: "A4"; width: number; height: number; margin: number };
   fields: FieldPlacement[];
+  lines: LineElement[];       // horizontal / vertical rule lines
   linesTable: LinesTable;
 };
 
-export const A4 = { width: 595, height: 842 }; // points
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+export const A4 = { width: 595, height: 842 }; // PDF points
 
 export const AVAILABLE_FIELDS: Array<{ key: FieldKey; label: string; defaultW: number; defaultH: number }> = [
-  { key: "InvoiceNumber", label: "Invoice Number", defaultW: 160, defaultH: 18 },
-  { key: "InvoiceDate", label: "Invoice Date", defaultW: 160, defaultH: 14 },
-  { key: "DueDate", label: "Due Date", defaultW: 160, defaultH: 14 },
-  { key: "CompanyName", label: "Company Name", defaultW: 280, defaultH: 18 },
-  { key: "CompanyAddress", label: "Company Address", defaultW: 280, defaultH: 42 },
-  { key: "CompanyPhone", label: "Company Phone", defaultW: 200, defaultH: 14 },
-  { key: "CustomerName", label: "Customer Name", defaultW: 280, defaultH: 18 },
-  { key: "CustomerPhone", label: "Customer Phone", defaultW: 200, defaultH: 14 },
+  { key: "InvoiceNumber",   label: "Invoice Number",   defaultW: 160, defaultH: 18 },
+  { key: "InvoiceDate",     label: "Invoice Date",     defaultW: 160, defaultH: 14 },
+  { key: "DueDate",         label: "Due Date",         defaultW: 160, defaultH: 14 },
+  { key: "CompanyName",     label: "Company Name",     defaultW: 280, defaultH: 18 },
+  { key: "CompanyAddress",  label: "Company Address",  defaultW: 280, defaultH: 42 },
+  { key: "CompanyPhone",    label: "Company Phone",    defaultW: 200, defaultH: 14 },
+  { key: "CustomerName",    label: "Customer Name",    defaultW: 280, defaultH: 18 },
+  { key: "CustomerPhone",   label: "Customer Phone",   defaultW: 200, defaultH: 14 },
   { key: "CustomerAddress", label: "Customer Address", defaultW: 280, defaultH: 42 },
-  { key: "SubTotal", label: "Sub Total", defaultW: 140, defaultH: 14 },
-  { key: "TaxTotal", label: "Tax Total", defaultW: 140, defaultH: 14 },
-  { key: "GrandTotal", label: "Grand Total", defaultW: 160, defaultH: 18 },
-  { key: "PaidTotal", label: "Paid Total", defaultW: 140, defaultH: 14 },
-  { key: "BalanceDue", label: "Balance Due", defaultW: 140, defaultH: 14 },
-  { key: "Status", label: "Status", defaultW: 120, defaultH: 14 },
+  { key: "SubTotal",        label: "Sub Total",        defaultW: 140, defaultH: 14 },
+  { key: "TaxTotal",        label: "Tax Total",        defaultW: 140, defaultH: 14 },
+  { key: "GrandTotal",      label: "Grand Total",      defaultW: 160, defaultH: 18 },
+  { key: "PaidTotal",       label: "Paid Total",       defaultW: 140, defaultH: 14 },
+  { key: "BalanceDue",      label: "Balance Due",      defaultW: 140, defaultH: 14 },
+  { key: "Status",          label: "Status",           defaultW: 120, defaultH: 14 },
 ];
 
 export function defaultTemplate(): PdfTemplateDefinition {
@@ -82,42 +104,35 @@ export function defaultTemplate(): PdfTemplateDefinition {
       {
         id: "f_invoiceNumber",
         key: "InvoiceNumber",
-        x: 380,
-        y: 48,
-        w: 180,
-        h: 18,
+        x: 380, y: 48, w: 180, h: 18,
         align: "Right",
         font: { family: "Roboto", size: 14, bold: true, italic: false },
       },
       {
         id: "f_customerName",
         key: "CustomerName",
-        x: 60,
-        y: 140,
-        w: 300,
-        h: 18,
+        x: 60, y: 140, w: 300, h: 18,
         align: "Left",
         font: { family: "Roboto", size: 12, bold: true, italic: false },
       },
     ],
+    lines: [],
     linesTable: {
-      x: 60,
-      y: 220,
-      w: 475,
-      h: 420,
-      headerFont: { family: "Roboto", size: 10, bold: true, italic: false },
-      rowFont: { family: "Roboto", size: 10, bold: false, italic: false },
+      x: 60, y: 220, w: 475, h: 420,
+      headerFont: { family: "Roboto", size: 10, bold: true,  italic: false },
+      rowFont:    { family: "Roboto", size: 10, bold: false, italic: false },
       columns: [
-        { key: "Description", w: 255, align: "Left" },
-        { key: "Qty", w: 50, align: "Right" },
-        { key: "Rate", w: 80, align: "Right" },
-        { key: "Amount", w: 90, align: "Right" },
+        { key: "Description", w: 255, align: "Left"  },
+        { key: "Qty",         w: 50,  align: "Right" },
+        { key: "Rate",        w: 80,  align: "Right" },
+        { key: "Amount",      w: 90,  align: "Right" },
       ],
     },
   };
 }
 
 export function newId(prefix: string): string {
-  // works in modern browsers; fallback for older
-  return (globalThis.crypto?.randomUUID?.() ? `${prefix}_${crypto.randomUUID()}` : `${prefix}_${Date.now()}_${Math.random()}`);
+  return globalThis.crypto?.randomUUID?.()
+    ? `${prefix}_${crypto.randomUUID()}`
+    : `${prefix}_${Date.now()}_${Math.random()}`;
 }

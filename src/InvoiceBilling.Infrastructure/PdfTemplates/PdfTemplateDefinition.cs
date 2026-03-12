@@ -14,8 +14,49 @@ public sealed class PdfTemplateDefinition
     [JsonPropertyName("fields")]
     public List<PdfTemplateField> Fields { get; set; } = new();
 
+    /// <summary>
+    /// Horizontal and vertical rule lines added in the designer.
+    /// Each line is drawn as a straight stroke on the page.
+    /// </summary>
+    [JsonPropertyName("lines")]
+    public List<PdfLineElement> Lines { get; set; } = new();
+
     [JsonPropertyName("linesTable")]
     public PdfLinesTableSpec? LinesTable { get; set; }
+}
+
+/// <summary>
+/// A single horizontal or vertical rule line drawn on the PDF page.
+/// </summary>
+public sealed class PdfLineElement
+{
+    /// <summary>UI element id – ignored by the renderer.</summary>
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>"H" for horizontal, "V" for vertical.</summary>
+    [JsonPropertyName("orientation")]
+    public string Orientation { get; set; } = "H";
+
+    /// <summary>X coordinate of the line start, in points.</summary>
+    [JsonPropertyName("x")]
+    public double X { get; set; }
+
+    /// <summary>Y coordinate of the line start, in points.</summary>
+    [JsonPropertyName("y")]
+    public double Y { get; set; }
+
+    /// <summary>Total length of the line, in points.</summary>
+    [JsonPropertyName("length")]
+    public double Length { get; set; }
+
+    /// <summary>Stroke width in points. 1 = hairline.</summary>
+    [JsonPropertyName("thickness")]
+    public double Thickness { get; set; } = 1;
+
+    /// <summary>Hex stroke colour, e.g. "#000000". Defaults to black.</summary>
+    [JsonPropertyName("color")]
+    public string? Color { get; set; }
 }
 
 public sealed class PdfPageSpec

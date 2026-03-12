@@ -44,6 +44,25 @@ public sealed class InvoicePdfTemplateRenderer : IInvoicePdfTemplateRenderer
             }
         }
 
+        // Horizontal / vertical rule lines added in the designer
+        foreach (var line in template.Lines ?? new List<PdfLineElement>())
+        {
+            if (line.Length <= 0) continue;
+
+            var pen = ToPen(line.Color, line.Thickness > 0 ? line.Thickness : 1);
+
+            if (string.Equals(line.Orientation, "V", StringComparison.OrdinalIgnoreCase))
+            {
+                // Vertical: (x, y) → (x, y + length)
+                gfx.DrawLine(pen, line.X, line.Y, line.X, line.Y + line.Length);
+            }
+            else
+            {
+                // Horizontal (default): (x, y) → (x + length, y)
+                gfx.DrawLine(pen, line.X, line.Y, line.X + line.Length, line.Y);
+            }
+        }
+
         // Lines table
         if (template.LinesTable is not null && template.LinesTable.Columns.Count > 0)
             RenderLinesTable(gfx, invoice, template);
@@ -148,5 +167,24 @@ public sealed class InvoicePdfTemplateRenderer : IInvoicePdfTemplateRenderer
         }
         catch { /* ignore malformed color */ }
         return XBrushes.Black;
+    }
+
+    private static XPen ToPen(string? hex, double thickness)
+    {
+        if (string.IsNullOrWhiteSpace(hex))
+            return new XPen(XColors.Black, thickness);
+        try
+        {
+            var h = hex.Trim().TrimStart('#');
+            if (h.Length == 6)
+            {
+                var r = Convert.ToInt32(h.Substring(0, 2), 16);
+                var g = Convert.ToInt32(h.Substring(2, 2), 16);
+                var b = Convert.ToInt32(h.Substring(4, 2), 16);
+                return new XPen(XColor.FromArgb(r, g, b), thickness);
+            }
+        }
+        catch { /* ignore malformed color */ }
+        return new XPen(XColors.Black, thickness);
     }
 }
