@@ -5,6 +5,7 @@ import type { Product, CreateProductRequest } from "./types";
 import { getProducts, createProduct, updateProduct, deleteProduct } from "../../api/productsApi";
 import { formatError, type ErrorInfo } from "../../api/errorFormat";
 import ErrorBanner from "../../components/ErrorBanner";
+import BackButton from "../../components/BackButton";
 
 type ProductFormState = {
   name: string;
@@ -159,7 +160,10 @@ export default function ProductsPage() {
 
   return (
     <div style={{ padding: 16, maxWidth: 1100, margin: "0 auto" }}>
-      <h2 style={{ marginBottom: 8 }}>Products</h2>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+        <BackButton fallback="/" />
+        <h2 style={{ margin: 0 }}>Products</h2>
+      </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
         <button type="button" onClick={loadProducts} disabled={loading}>

@@ -187,9 +187,9 @@ export default function PdfTemplateDesignerPage() {
           ...raw,
           lines: raw.lines ?? [],   // back-compat: old templates have no lines array
           fields: raw.fields.map((f, i) => ({
-            align: "Left" as const,
-            color: DEFAULT_COLOR,
             ...f,
+            align: (f.align ?? "Left") as Align,
+            color: f.color ?? DEFAULT_COLOR,
             id: f.id && f.id.trim() !== "" ? f.id : newId(`f${i}`),
           })),
         };
@@ -285,7 +285,7 @@ export default function PdfTemplateDesignerPage() {
     }));
   }
 
-  function updateColumn(colIndex: number, patch: { header?: string; w?: number; align?: string }) {
+  function updateColumn(colIndex: number, patch: { header?: string; w?: number; align?: Align }) {
     setTemplate(prev => {
       const cols = prev.linesTable.columns.map((c, i) =>
         i === colIndex ? { ...c, ...patch } : c,
@@ -1016,7 +1016,7 @@ export default function PdfTemplateDesignerPage() {
                       <select
                         value={col.align ?? "Left"}
                         style={inputStyle}
-                        onChange={e => updateColumn(i, { align: e.target.value })}
+                        onChange={e => updateColumn(i, { align: e.target.value as Align })}
                       >
                         {ALIGNMENTS.map(a => <option key={a} value={a}>{a}</option>)}
                       </select>

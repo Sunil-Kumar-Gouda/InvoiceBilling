@@ -61,7 +61,7 @@ export type LinesTable = {
   h: number;
   headerFont: FontSpec;
   rowFont: FontSpec;
-  columns: Array<{ key: LinesTableColumnKey; w: number; align: Align }>;
+  columns: Array<{ key: LinesTableColumnKey; w: number; align: Align; header?: string }>;
 };
 
 // ─── Template root ────────────────────────────────────────────────────────────

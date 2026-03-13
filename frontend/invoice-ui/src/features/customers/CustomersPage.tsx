@@ -3,6 +3,7 @@ import type { ChangeEvent, FormEvent } from "react";
 import { createCustomer, getCustomers } from "../../api/customersApi";
 import { formatError, type ErrorInfo } from "../../api/errorFormat";
 import ErrorBanner from "../../components/ErrorBanner";
+import BackButton from "../../components/BackButton";
 import type { Customer, CreateCustomerRequest } from "./types";
 
 function CustomersPage() {
@@ -78,7 +79,10 @@ function CustomersPage() {
 
   return (
     <div style={{ padding: "1rem" }}>
-      <h1>Customers</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+        <BackButton fallback="/" />
+        <h1 style={{ margin: 0 }}>Customers</h1>
+      </div>
 
       {loading && <p>Loading customers...</p>}
       {error && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
