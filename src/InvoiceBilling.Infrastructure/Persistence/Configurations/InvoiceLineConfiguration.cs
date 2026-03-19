@@ -10,8 +10,10 @@ public sealed class InvoiceLineConfiguration : IEntityTypeConfiguration<InvoiceL
     {
         builder.HasKey(x => x.Id);
 
-        builder.Property(x => x.Description).HasMaxLength(300).IsRequired();
+        builder.Property(x => x.Id).ValueGeneratedNever();
 
+        builder.Property(x => x.Description).HasMaxLength(300).IsRequired();
+        
         builder.Property(x => x.UnitPrice).HasPrecision(18, 2);
         builder.Property(x => x.Quantity).HasPrecision(18, 2);
         builder.Property(x => x.LineTotal).HasPrecision(18, 2);

@@ -10,6 +10,8 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
     {
         builder.HasKey(x => x.Id);
 
+        builder.Property(x => x.Id).ValueGeneratedNever();
+
         builder.Property(x => x.InvoiceNumber).HasMaxLength(32).IsRequired();
         builder.HasIndex(x => x.InvoiceNumber).IsUnique();
 

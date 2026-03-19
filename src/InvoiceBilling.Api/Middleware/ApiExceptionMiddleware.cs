@@ -21,11 +21,13 @@ public sealed class ApiExceptionMiddleware
 
     private readonly RequestDelegate _next;
     private readonly ILogger<ApiExceptionMiddleware> _logger;
+    private readonly bool _includeDetails;
 
-    public ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMiddleware> logger)
+    public ApiExceptionMiddleware(RequestDelegate next, ILogger<ApiExceptionMiddleware> logger, IHostEnvironment env)
     {
         _next = next;
         _logger = logger;
+        _includeDetails = !env.IsProduction();
     }
 
     public async Task Invoke(HttpContext context)
@@ -60,11 +62,16 @@ public sealed class ApiExceptionMiddleware
         {
             _logger.LogError(ex, "Unhandled exception");
 
+            var detail = _includeDetails
+                ? $"[{ex.GetType().Name}] {ex.Message}" +
+                  (ex.InnerException is not null ? $" --> [{ex.InnerException.GetType().Name}] {ex.InnerException.Message}" : "")
+                : "An unexpected error occurred.";
+
             await WriteProblemAsync(
                 context,
                 StatusCodes.Status500InternalServerError,
                 title: "Unexpected error",
-                detail: "An unexpected error occurred.");
+                detail: detail);
         }
     }
 

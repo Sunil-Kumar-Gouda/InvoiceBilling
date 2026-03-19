@@ -57,6 +57,7 @@ public sealed class UpdateDraftInvoiceHandler
         }
 
         var invoice = await _db.Invoices
+            .Include(i => i.Lines)
             .FirstOrDefaultAsync(i => i.Id == request.InvoiceId, cancellationToken);
 
         if (invoice is null)
@@ -99,18 +100,18 @@ public sealed class UpdateDraftInvoiceHandler
                 ErrorDetail: $"Unknown ProductId(s): {string.Join(", ", missing)}");
         }
 
-        await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
-
-        // Delete then rebuild: stable, repeatable, and avoids tracked-graph concurrency exceptions.
-        await _db.InvoiceLines
-            .Where(l => l.InvoiceId == invoice.Id)
-            .ExecuteDeleteAsync(cancellationToken);
+        // Snapshot the currently-tracked lines before domain methods clear and
+        // replace the collection.  EF's orphan-deletion does not reliably detect
+        // removals from a field-backed List<T> when the navigation has no inverse
+        // property (WithOne() without a lambda), so we mark them explicitly.
+        var existingLines = invoice.Lines.ToList();
 
         invoice.UpdateDraftHeader(request.DueDate, request.CurrencyCode, request.TaxRatePercent);
         invoice.ReplaceLines(request.Lines.Select(l => (l.ProductId, l.Description, l.UnitPrice, l.Quantity)));
 
+        _db.InvoiceLines.RemoveRange(existingLines);
+
         await _db.SaveChangesAsync(cancellationToken);
-        await tx.CommitAsync(cancellationToken);
 
         return new UpdateDraftInvoiceResponse(Succeeded: true, Invoice: invoice);
     }
