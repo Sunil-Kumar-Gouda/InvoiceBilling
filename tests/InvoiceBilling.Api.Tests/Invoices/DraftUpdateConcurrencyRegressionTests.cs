@@ -19,53 +19,53 @@ public class DraftUpdateConcurrencyRegressionTests : IClassFixture<TestWebApplic
         _factory = factory;
     }
 
-    // [Fact]
-    // public async Task Put_draft_invoice_can_be_called_repeatedly_without_500_and_lines_match_latest_payload()
-    // {
-    //     await ResetDatabaseAsync();
+    [Fact]
+    public async Task Put_draft_invoice_can_be_called_repeatedly_without_500_and_lines_match_latest_payload()
+    {
+        await ResetDatabaseAsync();
 
-    //     var client = _factory.CreateClient();
-    //     var (customerId, productIds) = await SeedCustomerAndProductsAsync(client, productCount: 3);
+        var client = _factory.CreateClient();
+        var (customerId, productIds) = await SeedCustomerAndProductsAsync(client, productCount: 3);
 
-    //     var invoice = await CreateDraftInvoiceAsync(client, customerId, new[]
-    //     {
-    //         (productIds[0], "Line 1", 100m, 1m),
-    //         (productIds[1], "Line 2",  50m, 2m),
-    //     });
+        var invoice = await CreateDraftInvoiceAsync(client, customerId, new[]
+        {
+            (productIds[0], "Line 1", 100m, 1m),
+            (productIds[1], "Line 2",  50m, 2m),
+        });
 
-    //     for (var i = 0; i < 10; i++)
-    //     {
-    //         var lines = (i % 2 == 0)
-    //             ? new List<UpdateInvoiceLineRequest>
-    //             {
-    //                 new() { ProductId = productIds[0], Description = $"A{i}", UnitPrice = 100m + i, Quantity = 1m + i },
-    //                 new() { ProductId = productIds[1], Description = $"B{i}", UnitPrice =  50m,     Quantity = 2m },
-    //             }
-    //             : new List<UpdateInvoiceLineRequest>
-    //             {
-    //                 new() { ProductId = productIds[0], Description = $"A{i}", UnitPrice = 100m, Quantity = 1m },
-    //                 new() { ProductId = productIds[1], Description = $"B{i}", UnitPrice =  55m, Quantity = 2m },
-    //                 new() { ProductId = productIds[2], Description = $"C{i}", UnitPrice =  10m, Quantity = 3m },
-    //             };
+        for (var i = 0; i < 10; i++)
+        {
+            var lines = (i % 2 == 0)
+                ? new List<UpdateInvoiceLineRequest>
+                {
+                    new() { ProductId = productIds[0], Description = $"A{i}", UnitPrice = 100m + i, Quantity = 1m + i },
+                    new() { ProductId = productIds[1], Description = $"B{i}", UnitPrice =  50m,     Quantity = 2m },
+                }
+                : new List<UpdateInvoiceLineRequest>
+                {
+                    new() { ProductId = productIds[0], Description = $"A{i}", UnitPrice = 100m, Quantity = 1m },
+                    new() { ProductId = productIds[1], Description = $"B{i}", UnitPrice =  55m, Quantity = 2m },
+                    new() { ProductId = productIds[2], Description = $"C{i}", UnitPrice =  10m, Quantity = 3m },
+                };
 
-    //         var req = new UpdateInvoiceRequest
-    //         {
-    //             DueDate = DateTime.UtcNow.Date.AddDays(14),
-    //             CurrencyCode = "INR",
-    //             TaxRatePercent = 5m,
-    //             Lines = lines
-    //         };
+            var req = new UpdateInvoiceRequest
+            {
+                DueDate = DateTime.UtcNow.Date.AddDays(14),
+                CurrencyCode = "INR",
+                TaxRatePercent = 5m,
+                Lines = lines
+            };
 
-    //         var put = await client.PutAsJsonAsync($"/api/invoices/{invoice.Id}", req);
-    //         var body = await put.Content.ReadAsStringAsync();
+            var put = await client.PutAsJsonAsync($"/api/invoices/{invoice.Id}", req);
+            var body = await put.Content.ReadAsStringAsync();
 
-    //         // This assertion prints the response body on failure — critical for diagnosing 500s.
-    //         Assert.True(put.IsSuccessStatusCode, $"Iteration {i} failed ({put.StatusCode}): {body}");
+            // This assertion prints the response body on failure — critical for diagnosing 500s.
+            Assert.True(put.IsSuccessStatusCode, $"Iteration {i} failed ({put.StatusCode}): {body}");
 
-    //         await AssertInvoiceLinesInDbAsync(invoice.Id, expectedCount: lines.Count);
-    //         await AssertInvoiceTotalsInDbAsync(invoice.Id, req.TaxRatePercent, lines);
-    //     }
-    // }
+            await AssertInvoiceLinesInDbAsync(invoice.Id, expectedCount: lines.Count);
+            await AssertInvoiceTotalsInDbAsync(invoice.Id, req.TaxRatePercent, lines);
+        }
+    }
 
     [Fact]
     public async Task Put_draft_invoice_can_remove_lines_and_db_has_no_orphans()

@@ -13,17 +13,18 @@ public sealed class InvoiceLineConfiguration : IEntityTypeConfiguration<InvoiceL
         builder.Property(x => x.Id).ValueGeneratedNever();
 
         builder.Property(x => x.Description).HasMaxLength(300).IsRequired();
-        
+
         builder.Property(x => x.UnitPrice).HasPrecision(18, 2);
         builder.Property(x => x.Quantity).HasPrecision(18, 2);
         builder.Property(x => x.LineTotal).HasPrecision(18, 2);
 
         // Constraints (DB-level safety net)
+        // (SQLite): decimals are stored as TEXT; "+0" forces numeric comparison.
         builder.ToTable(t =>
         {
-            t.HasCheckConstraint("CK_InvoiceLines_Quantity_Positive", "Quantity > 0");
-            t.HasCheckConstraint("CK_InvoiceLines_UnitPrice_NonNegative", "UnitPrice >= 0");
-            t.HasCheckConstraint("CK_InvoiceLines_LineTotal_NonNegative", "LineTotal >= 0");
+            t.HasCheckConstraint("CK_InvoiceLines_Quantity_Positive", "(Quantity + 0) > 0");
+            t.HasCheckConstraint("CK_InvoiceLines_UnitPrice_NonNegative", "(UnitPrice + 0) >= 0");
+            t.HasCheckConstraint("CK_InvoiceLines_LineTotal_NonNegative", "(LineTotal + 0) >= 0");
         });
 
         // Relationships

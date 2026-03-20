@@ -29,16 +29,17 @@ public sealed class InvoiceConfiguration : IEntityTypeConfiguration<Invoice>
         builder.Property(x => x.TaxRatePercent).HasPrecision(5, 2);
 
         // Constraints (DB-level safety net)
+        // (SQLite): decimals are stored as TEXT by default; the "+0" coerces
+        // the value to a numeric type so comparisons are numeric, not lexicographic.
         builder.ToTable(t =>
         {
-            t.HasCheckConstraint("CK_Invoices_TaxRatePercent_Range", "TaxRatePercent >= 0 AND TaxRatePercent <= 100");
-            t.HasCheckConstraint("CK_Invoices_Subtotal_NonNegative", "Subtotal >= 0");
-            t.HasCheckConstraint("CK_Invoices_TaxTotal_NonNegative", "TaxTotal >= 0");
-            t.HasCheckConstraint("CK_Invoices_GrandTotal_NonNegative", "GrandTotal >= 0");
-            t.HasCheckConstraint("CK_Invoices_PaidTotal_NonNegative", "PaidTotal >= 0");
-            t.HasCheckConstraint("CK_Invoices_BalanceDue_NonNegative", "BalanceDue >= 0");
-            // (SQLite): decimals are stored as TEXT by default; forcing numeric coercion avoids lexicographic comparisons.
-            t.HasCheckConstraint("CK_Invoices_PaidTotal_LTE_GrandTotal", "PaidTotal - GrandTotal <= 0");
+            t.HasCheckConstraint("CK_Invoices_TaxRatePercent_Range", "(TaxRatePercent + 0) >= 0 AND (TaxRatePercent + 0) <= 100");
+            t.HasCheckConstraint("CK_Invoices_Subtotal_NonNegative", "(Subtotal + 0) >= 0");
+            t.HasCheckConstraint("CK_Invoices_TaxTotal_NonNegative", "(TaxTotal + 0) >= 0");
+            t.HasCheckConstraint("CK_Invoices_GrandTotal_NonNegative", "(GrandTotal + 0) >= 0");
+            t.HasCheckConstraint("CK_Invoices_PaidTotal_NonNegative", "(PaidTotal + 0) >= 0");
+            t.HasCheckConstraint("CK_Invoices_BalanceDue_NonNegative", "(BalanceDue + 0) >= 0");
+            t.HasCheckConstraint("CK_Invoices_PaidTotal_LTE_GrandTotal", "(PaidTotal + 0) - (GrandTotal + 0) <= 0");
         });
 
         // Relationships

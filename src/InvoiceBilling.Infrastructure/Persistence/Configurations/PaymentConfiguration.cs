@@ -12,15 +12,16 @@ public sealed class PaymentConfiguration : IEntityTypeConfiguration<Payment>
 
         builder.Property(x => x.Id).ValueGeneratedNever();
         builder.Property(x => x.Amount).HasPrecision(18, 2);
-        
+
         builder.Property(x => x.Method).HasMaxLength(32);
         builder.Property(x => x.Reference).HasMaxLength(64);
         builder.Property(x => x.Note).HasMaxLength(512);
 
         // Constraints (DB-level safety net)
+        // (SQLite): decimals are stored as TEXT; "+0" forces numeric comparison.
         builder.ToTable("Payments", t =>
         {
-            t.HasCheckConstraint("CK_Payments_Amount_Positive", "Amount > 0");
+            t.HasCheckConstraint("CK_Payments_Amount_Positive", "(Amount + 0) > 0");
         });
 
         // Relationships
