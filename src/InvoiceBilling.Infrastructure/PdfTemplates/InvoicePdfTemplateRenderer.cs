@@ -20,7 +20,7 @@ public sealed class InvoicePdfTemplateRenderer : IInvoicePdfTemplateRenderer
 
         var doc = new PdfDocument();
         var page = doc.AddPage();
-        page.Width  = XUnit.FromPoint(template.Page.Width);
+        page.Width = XUnit.FromPoint(template.Page.Width);
         page.Height = XUnit.FromPoint(template.Page.Height);
 
         using var gfx = XGraphics.FromPdfPage(page);
@@ -29,7 +29,7 @@ public sealed class InvoicePdfTemplateRenderer : IInvoicePdfTemplateRenderer
         foreach (var f in template.Fields ?? new List<PdfTemplateField>())
         {
             var value = _resolver.Resolve(invoice, f.Key);
-            var font  = ToXFont(f.Font);
+            var font = ToXFont(f.Font);
             var brush = ToBrush(f.Color);
 
             if (f.W > 0 && f.H > 0)
@@ -80,16 +80,16 @@ public sealed class InvoicePdfTemplateRenderer : IInvoicePdfTemplateRenderer
 
     private void RenderLinesTable(XGraphics gfx, object invoice, PdfTemplateDefinition template)
     {
-        var table     = template.LinesTable!;
-        var xStart    = table.X;
-        var yStart    = table.Y;
+        var table = template.LinesTable!;
+        var xStart = table.X;
+        var yStart = table.Y;
         var tableEndX = table.X + table.W;
-        var rowH      = table.RowHeight > 0 ? table.RowHeight : 16;
-        var maxY      = yStart + table.H;
+        var rowH = table.RowHeight > 0 ? table.RowHeight : 16;
+        var maxY = yStart + table.H;
 
-        var colWidths  = table.Columns.Select(c => c.W).ToArray();
+        var colWidths = table.Columns.Select(c => c.W).ToArray();
         var headerFont = ToXFont(table.HeaderFont);
-        var cellFont   = ToXFont(table.RowFont);
+        var cellFont = ToXFont(table.RowFont);
 
         var y = yStart;
 
@@ -101,7 +101,7 @@ public sealed class InvoicePdfTemplateRenderer : IInvoicePdfTemplateRenderer
         double x = xStart;
         for (var i = 0; i < table.Columns.Count; i++)
         {
-            var col   = table.Columns[i];
+            var col = table.Columns[i];
             var label = string.IsNullOrWhiteSpace(col.Header) ? col.Key : col.Header;
             gfx.DrawString(label, headerFont, XBrushes.Black,
                 new XRect(x, y, colWidths[i], rowH), ToStringFormat(col.Align));
@@ -121,7 +121,7 @@ public sealed class InvoicePdfTemplateRenderer : IInvoicePdfTemplateRenderer
             x = xStart;
             for (var i = 0; i < table.Columns.Count; i++)
             {
-                var col  = table.Columns[i];
+                var col = table.Columns[i];
                 var text = _resolver.ResolveLine(line, col.Key);
                 gfx.DrawString(text, cellFont, XBrushes.Black,
                     new XRect(x, y, colWidths[i], rowH), ToStringFormat(col.Align));
@@ -138,15 +138,15 @@ public sealed class InvoicePdfTemplateRenderer : IInvoicePdfTemplateRenderer
     private static XStringFormat ToStringFormat(string? align) =>
         align?.Trim().ToUpperInvariant() switch
         {
-            "RIGHT"  => XStringFormats.TopRight,
+            "RIGHT" => XStringFormats.TopRight,
             "CENTER" => XStringFormats.TopCenter,
-            _        => XStringFormats.TopLeft
+            _ => XStringFormats.TopLeft
         };
 
     private static XFont ToXFont(PdfFontSpec spec)
     {
         var style = XFontStyleEx.Regular;
-        if (spec.Bold)   style |= XFontStyleEx.Bold;
+        if (spec.Bold) style |= XFontStyleEx.Bold;
         if (spec.Italic) style |= XFontStyleEx.Italic;
         return new XFont(spec.Family, spec.Size, style);
     }

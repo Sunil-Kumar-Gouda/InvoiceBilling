@@ -173,7 +173,7 @@ public sealed class InvoiceValueResolver
         decimal total = 0m;
         foreach (var line in GetLines(invoice))
         {
-            var qty   = GetDecimal(line, "Quantity", "Qty") ?? 0m;
+            var qty = GetDecimal(line, "Quantity", "Qty") ?? 0m;
             var price = GetDecimal(line, "UnitPrice", "Price") ?? 0m;
             total += qty * price;
         }
@@ -214,7 +214,7 @@ public sealed class InvoiceValueResolver
             var v = p.GetValue(obj);
             if (v is null) continue;
             if (v is DateTimeOffset dto) return dto;
-            if (v is DateTime dt)        return new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc));
+            if (v is DateTime dt) return new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc));
         }
         return null;
     }
@@ -227,9 +227,9 @@ public sealed class InvoiceValueResolver
             if (p is null) continue;
             var v = p.GetValue(obj);
             if (v is null) continue;
-            if (v is decimal d)  return d;
-            if (v is double db)  return (decimal)db;
-            if (v is float f)    return (decimal)f;
+            if (v is decimal d) return d;
+            if (v is double db) return (decimal)db;
+            if (v is float f) return (decimal)f;
             if (decimal.TryParse(v.ToString(), NumberStyles.Any,
                     CultureInfo.InvariantCulture, out var parsed)) return parsed;
         }
