@@ -4,6 +4,7 @@ using InvoiceBilling.Api.Features.Common;
 using InvoiceBilling.Application.Invoices.IssueInvoice;
 using InvoiceBilling.Application.Invoices.UpdateDraftInvoice;
 using InvoiceBilling.Infrastructure;
+using InvoiceBilling.Infrastructure.Standalone;
 using Microsoft.OpenApi.Models;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -71,9 +72,24 @@ builder.Services.AddMediatR(cfg =>
 
 builder.Services.AddHealthChecks();
 
-if (builder.Configuration.GetValue<bool>("BackgroundWorkers:InvoicePdfWorker:Enabled"))
+// ── Background worker registration ──────────────────────────────────
+// Wire the correct PDF worker based on infrastructure mode.
+// Cloud mode: SQS-polling worker (existing).
+// Standalone mode: in-process channel-reading worker.
+var workerEnabled = builder.Configuration.GetValue<bool>("BackgroundWorkers:InvoicePdfWorker:Enabled");
+
+if (workerEnabled)
 {
-    builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
+    var infraMode = builder.Configuration.GetValue<InfrastructureMode>("Infrastructure:Mode");
+
+    if (infraMode == InfrastructureMode.Standalone)
+    {
+        builder.Services.AddHostedService<InvoiceBilling.Api.Background.InProcessPdfWorker>();
+    }
+    else
+    {
+        builder.Services.AddHostedService<InvoiceBilling.Api.Background.InvoicePdfWorker>();
+    }
 }
 
 // Auth foundation (JWT) + authorization policy wiring

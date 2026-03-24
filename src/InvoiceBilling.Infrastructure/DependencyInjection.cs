@@ -9,6 +9,7 @@ using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.SQS;
 using InvoiceBilling.Infrastructure.Cloud;
+using InvoiceBilling.Infrastructure.Standalone;
 using Microsoft.Extensions.Options;
 using InvoiceBilling.Domain.Services;
 using Microsoft.Extensions.Hosting;
@@ -28,7 +29,7 @@ public static class DependencyInjection
         IConfiguration configuration,
         IHostEnvironment environment)
     {
-        // Use API project's content root so path is stable for dotnet ef
+        // Database: SQLite (no server needed in either mode).
         var dataDir = Path.Combine(environment.ContentRootPath, "Data");
         Directory.CreateDirectory(dataDir);
 
@@ -64,8 +65,7 @@ public static class DependencyInjection
         services.AddScoped<IInvoiceBillingDbContext>(sp =>
             sp.GetRequiredService<InvoiceBillingDbContext>());
 
-        // PDF template storage (file-based) + renderer.
-        // This is intentionally infrastructure-only so you can swap to DB storage later.
+        // PDF template storage (file-based) + renderer (shared by both modes).
         services.Configure<PdfTemplatesOptions>(configuration.GetSection(PdfTemplatesOptions.SectionName));
         services.AddSingleton<IPdfTemplateStore, FilePdfTemplateStore>();
         services.AddSingleton<IActivePdfTemplateStore>(sp => (IActivePdfTemplateStore)sp.GetRequiredService<IPdfTemplateStore>());
@@ -73,10 +73,29 @@ public static class DependencyInjection
         services.AddScoped<IInvoicePdfTemplateRenderer, InvoicePdfTemplateRenderer>();
         services.AddScoped<IInvoicePdfPreviewRenderer, InvoicePdfPreviewRenderer>();
 
-        // Bind AwsOptions from configuration
+        // Domain services (stateless, shared).
+        services.AddSingleton<IInvoiceTotalsCalculator, InvoiceTotalsCalculator>();
+
+        // ── Mode-specific registrations ───────────────────────────────────
+
+        var mode = configuration.GetValue<InfrastructureMode>("Infrastructure:Mode");
+
+        if (mode == InfrastructureMode.Standalone)
+            AddStandaloneServices(services, configuration);
+        else
+            AddCloudServices(services, configuration);
+
+        return services;
+    }
+
+    /// <summary>
+    /// Registers AWS-backed services: S3 client, SQS client, and their consumers.
+    /// Requires Docker + LocalStack (or real AWS credentials) at runtime.
+    /// </summary>
+    private static void AddCloudServices(IServiceCollection services, IConfiguration configuration)
+    {
         services.Configure<AwsOptions>(configuration.GetSection("Aws"));
 
-        // Validate bound options at startup
         services.AddOptions<AwsOptions>()
             .Validate(o => !string.IsNullOrWhiteSpace(o.ServiceUrl), "Aws:ServiceUrl is required")
             .Validate(o => !string.IsNullOrWhiteSpace(o.S3?.BucketName), "Aws:S3:BucketName is required")
@@ -112,10 +131,32 @@ public static class DependencyInjection
             return new AmazonSQSClient(new BasicAWSCredentials("test", "test"), cfg);
         });
 
-        services.AddSingleton<IInvoiceTotalsCalculator, InvoiceTotalsCalculator>();
         services.AddSingleton<IInvoicePdfJobEnqueuer, SqsInvoicePdfJobEnqueuer>();
         services.AddSingleton<IInvoicePdfStorage, S3InvoicePdfStorage>();
+    }
 
-        return services;
+    /// <summary>
+    /// Registers in-process, filesystem-backed services.
+    /// Zero external dependencies — no Docker, no LocalStack, no AWS credentials.
+    /// </summary>
+    private static void AddStandaloneServices(IServiceCollection services, IConfiguration configuration)
+    {
+        services.Configure<StandaloneOptions>(configuration.GetSection(StandaloneOptions.SectionName));
+
+        services.AddOptions<StandaloneOptions>()
+            .Validate(
+                o => !string.IsNullOrWhiteSpace(o.PdfStoragePath),
+                "Infrastructure:Standalone:PdfStoragePath must not be empty.")
+            .ValidateOnStart();
+
+        // Single channel instance shared between the enqueuer and the worker.
+        services.AddSingleton<InProcessPdfJobChannel>();
+        services.AddSingleton<IInvoicePdfJobEnqueuer, InProcessPdfJobEnqueuer>();
+
+        // Register the concrete type so the InProcessPdfWorker can resolve file paths,
+        // then forward the interface to the same singleton instance.
+        services.AddSingleton<LocalFileInvoicePdfStorage>();
+        services.AddSingleton<IInvoicePdfStorage>(sp =>
+            sp.GetRequiredService<LocalFileInvoicePdfStorage>());
     }
 }
